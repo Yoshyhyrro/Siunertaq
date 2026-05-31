@@ -1,5 +1,5 @@
 // =============================================================================
-// build.sbt — banach-shake.g8 テンプレートリポジトリ自体のビルド定義
+// build.sbt — siunertaq.g8 テンプレートリポジトリ自体のビルド定義
 //
 // このファイルは giter8 テンプレートのテスト用。
 // 実際に生成されるプロジェクトの build.sbt は
@@ -14,8 +14,8 @@
 lazy val root = (project in file("."))
   .enablePlugins(ScriptedPlugin)
   .settings(
-    name        := "banach-shake.g8",
-    // giter8 プラグインのテスト設定
+    name        := "siunertaq.g8",
+    publish / skip := true,
     Test / test := {
       val _ = (Test / g8Test).toTask("").value
     },
