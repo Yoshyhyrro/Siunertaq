@@ -50,7 +50,7 @@ val PekkoVersion       = "1.4.0"
 val CatsEffectVersion  = "3.5.1"
 val Fs2Version         = "3.6.1"
 val CirceVersion       = "0.14.6"
-val Z3Version          = "4.12.6"
+val Z3Version          = "4.8.14-v5"
 val ScalaTestVersion   = "3.2.16"
 val LogbackVersion     = "1.4.11"
 
