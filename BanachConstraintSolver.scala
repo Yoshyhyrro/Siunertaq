@@ -1,7 +1,7 @@
-package $package$.z3
+package io.siunertaq.z3
 
 import com.microsoft.z3.*
-import $package$.{ BSDVertex, BSDArrow, FVRole }
+import io.siunertaq.{ BSDVertex, BSDArrow, FVRole }
 
 /** Z3 SMT ソルバでバナッハノルム閾値制約を検証する。
   *

@@ -1,4 +1,4 @@
-package $package$.dhall
+package io.siunertaq.dhall
 
 import cats.effect.IO
 import cats.syntax.either.*

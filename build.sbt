@@ -29,10 +29,10 @@
 //   libz3java.so は apt install z3 または Z3_LIB_PATH 環境変数で指定。
 // =============================================================================
 
-ThisBuild / scalaVersion     := "$scala_version$"
+ThisBuild / scalaVersion     := "3.3.1"
 ThisBuild / version          := "0.1.0-SNAPSHOT"
-ThisBuild / organization     := "$organization$"
-ThisBuild / organizationName := "$name$"
+ThisBuild / organization     := "io.siunertaq"
+ThisBuild / organizationName := "Siunertaq"
 
 // Scala 3.8 + JDK 17: sun.misc.Unsafe が制限されるため
 // lazy val の新実装に対応した JVM フラグが必要になる場合がある
@@ -46,13 +46,13 @@ ThisBuild / fork := true
 // バージョン定数
 // =============================================================================
 
-val PekkoVersion       = "$pekko_version$"
-val CatsEffectVersion  = "$cats_effect_version$"
-val Fs2Version         = "$fs2_version$"
-val CirceVersion       = "$circe_version$"
-val Z3Version          = "$z3_version$"
-val ScalaTestVersion   = "$scalatest_version$"
-val LogbackVersion     = "$logback_version$"
+val PekkoVersion       = "1.4.0"
+val CatsEffectVersion  = "3.5.1"
+val Fs2Version         = "3.6.1"
+val CirceVersion       = "0.14.6"
+val Z3Version          = "4.12.6"
+val ScalaTestVersion   = "3.2.16"
+val LogbackVersion     = "1.4.11"
 
 // =============================================================================
 // 共通コンパイラオプション (Scala 3.8)
@@ -90,7 +90,7 @@ val commonDependencies = Seq(
 lazy val root = (project in file("."))
   .aggregate(core, z3Bridge, dhallBridge, mlirBridge)
   .settings(
-    name           := "$name$",
+    name           := "Siunertaq",
     publish / skip := true,
     scalacOptions ++= commonScalacOptions
   )
@@ -105,7 +105,7 @@ lazy val root = (project in file("."))
 // ---------------------------------------------------------------------------
 lazy val core = (project in file("modules/core"))
   .settings(
-    name := "$name$-core",
+    name := "Siunertaq-core",
     scalacOptions ++= commonScalacOptions,
     libraryDependencies ++= commonDependencies ++ Seq(
       // Apache Pekko Streams: org.apache.pekko (Scala 3 ネイティブ)
@@ -138,7 +138,7 @@ lazy val core = (project in file("modules/core"))
 lazy val z3Bridge = (project in file("modules/z3-bridge"))
   .dependsOn(core)
   .settings(
-    name := "$name$-z3",
+    name := "Siunertaq-z3",
     scalacOptions ++= commonScalacOptions,
     libraryDependencies ++= commonDependencies ++ Seq(
       // com.microsoft.z3.{Context, Solver, RealExpr, Status, ...}
@@ -147,10 +147,10 @@ lazy val z3Bridge = (project in file("modules/z3-bridge"))
       // "com.microsoft" % "z3" % "4.12.6" from "file:lib/com.microsoft.z3.jar"
     ),
     // libz3.so + libz3java.so のパス
-    // Ubuntu: sudo apt install z3  →  /usr/lib/x86_64-linux-gnu/
+    // 今はwsl:  sudo apt install z3  →  /usr/lib/x86_64-linux-gnu/
     // 環境変数 Z3_LIB_PATH で CI ごとに上書き可能
     javaOptions ++= Seq(
-      s"-Djava.library.path=$${sys.env.getOrElse("Z3_LIB_PATH", "$z3_lib_path$")}"
+      s"-Djava.library.path=${sys.env.getOrElse("Z3_LIB_PATH", "") }"
     )
   )
 
@@ -165,7 +165,7 @@ lazy val z3Bridge = (project in file("modules/z3-bridge"))
 lazy val dhallBridge = (project in file("modules/dhall-bridge"))
   .dependsOn(core)
   .settings(
-    name := "$name$-dhall",
+    name := "Siunertaq-dhall",
     scalacOptions ++= commonScalacOptions,
     libraryDependencies ++= commonDependencies ++ Seq(
       "org.typelevel" %% "cats-effect"  % CatsEffectVersion,
@@ -187,7 +187,7 @@ lazy val dhallBridge = (project in file("modules/dhall-bridge"))
 lazy val mlirBridge = (project in file("modules/mlir-bridge"))
   .dependsOn(core, z3Bridge)
   .settings(
-    name := "$name$-mlir",
+    name := "Siunertaq-mlir",
     scalacOptions ++= commonScalacOptions,
     libraryDependencies ++= commonDependencies ++ Seq(
       "org.typelevel" %% "cats-effect" % CatsEffectVersion
@@ -197,7 +197,7 @@ lazy val mlirBridge = (project in file("modules/mlir-bridge"))
     // MLIR 共有ライブラリ (llvm-project ビルド成果物)
     // Ubuntu: sudo apt install llvm-18  →  /usr/lib/llvm-18/lib/
     javaOptions ++= Seq(
-      s"-Djava.library.path=$${sys.env.getOrElse("MLIR_LIB_PATH", "$mlir_lib_path$")}"
+      s"-Djava.library.path=${sys.env.getOrElse("MLIR_LIB_PATH", "") }"
     )
   )
 
@@ -210,7 +210,7 @@ ThisBuild / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-oDF")
 // =============================================================================
 // fat jar — sbt-assembly プラグイン追加時に有効化
 // =============================================================================
-// assembly / mainClass := Some("$package$.Main")
+// assembly / mainClass := Some("io.siunertaq.Main")
 // assembly / assemblyMergeStrategy := {
 //   case PathList("reference.conf")  => MergeStrategy.concat
 //   case PathList("META-INF", _*)    => MergeStrategy.discard

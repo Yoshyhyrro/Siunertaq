@@ -1,4 +1,4 @@
-package $package$
+package io.siunertaq
 
 import cats.effect.IO
 
