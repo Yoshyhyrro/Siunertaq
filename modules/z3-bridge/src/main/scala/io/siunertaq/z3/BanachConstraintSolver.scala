@@ -4,14 +4,14 @@ import com.microsoft.z3.*
 import io.siunertaq.{ BSDVertex, BSDArrow }
 import io.siunertaq.threshold.{ ThresholdConstraint, ThresholdNames, ThresholdProblem }
 
-/** Z3 SMT ソルバでバナッハノルム閾値制約を検証する。
+/** Verify Banach-norm threshold constraints using the Z3 SMT solver.
   *
-  * 方向付きバナッハ空間として見たクイバーのノルム制約:
-  *   - Frobenius 矢印:    tgt.norm >= src.norm  (ノルム単調増加)
-  *   - Verschiebung 矢印: tgt.norm <= src.norm  (ノルム単調減少)
-  *   - Dieudonné 関係:    selmer.norm * affine.norm == p * leech.norm
+  * Norm constraints on the quiver viewed as a directed Banach space:
+  *   - Frobenius arrows:    tgt.norm >= src.norm  (norm monotone increasing)
+  *   - Verschiebung arrows: tgt.norm <= src.norm  (norm monotone decreasing)
+  *   - Dieudonné relation:  selmer.norm * affine.norm == p * leech.norm
   *
-  * 使用例:
+  * Example usage:
   * {{{
   *   val arrows = List(
   *     BSDArrow.tensorBang(IO.unit),
@@ -66,8 +66,8 @@ object BanachConstraintSolver:
       if (res != null && res.equals(Status.SATISFIABLE))
         Right(solver.getModel.toString)
       else if (res != null && res.equals(Status.UNSATISFIABLE))
-        Left("UNSAT: ノルム制約が充足不可能")
+        Left("UNSAT: norm constraints are unsatisfiable")
       else
-        Left("UNKNOWN: Z3 が結論を出せませんでした")
+        Left("UNKNOWN: Z3 could not reach a conclusion")
     finally
       ctx.close()

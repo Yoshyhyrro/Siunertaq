@@ -62,6 +62,6 @@ class YicesThresholdSmokeSpec extends AnyFunSpec with Matchers:
       val result = YicesThresholdSolver.verify(problem)
       writeArtifact("unsat-result.txt", result.fold(identity, identity))
 
-      result shouldBe Left("UNSAT: Yices 2 がノルム制約を充足不能と判定しました")
+      result shouldBe Left("UNSAT: Yices 2 determined the norm constraints are unsatisfiable")
     }
   }

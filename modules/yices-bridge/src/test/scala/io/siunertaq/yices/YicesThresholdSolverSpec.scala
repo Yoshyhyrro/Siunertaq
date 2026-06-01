@@ -46,6 +46,6 @@ class YicesThresholdSolverSpec extends AnyFunSpec with Matchers:
     }
 
     it("rejects empty output") {
-      YicesThresholdSolver.parseStatus("   \n") shouldBe Left("Yices 2 から空の応答を受け取りました")
+      YicesThresholdSolver.parseStatus("   \n") shouldBe Left("Received empty response from Yices 2")
     }
   }
