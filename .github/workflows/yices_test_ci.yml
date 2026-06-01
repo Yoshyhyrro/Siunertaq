@@ -41,6 +41,8 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: sbt
+      - name: set up sbt
+        uses: sbt/setup-sbt@v1
 
       - name: Install Yices 2
         shell: bash
