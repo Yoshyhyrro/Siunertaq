@@ -29,7 +29,7 @@
 //   libz3java.so は apt install z3 または Z3_LIB_PATH 環境変数で指定。
 // =============================================================================
 
-ThisBuild / scalaVersion     := "3.3.1"
+ThisBuild / scalaVersion     := "3.8.3"
 ThisBuild / version          := "0.1.0-SNAPSHOT"
 ThisBuild / organization     := "io.siunertaq"
 ThisBuild / organizationName := "Siunertaq"
