@@ -1,32 +1,32 @@
 // =============================================================================
 // build.sbt — $name$ (generated from siunertaq.g8)
 //
-// "Siunertaq" (カラーリット語: 前方にあるもの・目的)
-// 方向付きバナッハ空間クイバーを使った JVM ビルドシステム
+// "Siunertaq" (Kalarit: "that which is ahead; purpose")
+// JVM build system based on directed Banach-space quivers
 //
 // Stack:
-//   Scala $scala_version$  ·  sbt $sbt_version$  ·  JDK 17+
+//   Scala $scala_version$ · sbt $sbt_version$ · JDK 17+
 //   Apache Pekko Streams $pekko_version$ (Apache 2.0)
-//   Z3 Java Bindings $z3_version$  ·  Cats Effect $cats_effect_version$
+//   Z3 Java Bindings $z3_version$ · Cats Effect $cats_effect_version$
 //
-// [Scala 3.8 の破壊的変更]
-//   - JDK 17 以上が必須 (sun.misc.Unsafe 廃止対応、JEP 471)
-//   - 標準ライブラリが Scala 3 でコンパイルされるようになった
-//   - LTS は 3.3.x。3.9 が次期 LTS 予定 (Q2 2026)
+// [Breaking changes in Scala 3.8]
+//   - JDK 17+ is required (sun.misc.Unsafe deprecation, JEP 471)
+//   - The standard library is now compiled for Scala 3
+//   - LTS is 3.3.x. 3.9 is planned as the next LTS (Q2 2026)
 //
-// [Apache Pekko について]
-//   Akka 2.6.x の Apache 2.0 フォーク。パッケージ名が
-//   com.typesafe.akka → org.apache.pekko に変わっている。
-//   Scala 3 ネイティブ対応のため CrossVersion.for3Use2_13 は不要。
+// [About Apache Pekko]
+//   Apache 2.0 fork of Akka 2.6.x. Package names changed from
+//   com.typesafe.akka → org.apache.pekko.
+//   CrossVersion.for3Use2_13 is unnecessary for native Scala 3 support.
 //
 // [CVE-2025-12183 / lz4-java]
-//   org.lz4:lz4-java はメンテナンス終了。
-//   Pekko 1.4.0 はすでに at.yawk.lz4:lz4-java に切り替え済み。
-//   自前コードで lz4 を直接使う場合も at.yawk.lz4 を使うこと。
+//   org.lz4:lz4-java is end-of-life.
+//   Pekko 1.4.0 has already switched to at.yawk.lz4:lz4-java.
+//   If you use lz4 directly in your code, prefer at.yawk.lz4.
 //
-// [Z3 ネイティブライブラリ]
-//   io.github.p-org.solvers:z3 は com.microsoft.z3.* パッケージをそのまま提供。
-//   libz3java.so は apt install z3 または Z3_LIB_PATH 環境変数で指定。
+// [Z3 native library]
+//   io.github.p-org.solvers:z3 republishes the com.microsoft.z3.* packages.
+//   Install libz3java.so via `apt install z3` or set via `Z3_LIB_PATH`.
 // =============================================================================
 
 ThisBuild / scalaVersion     := "3.8.3"
@@ -34,8 +34,8 @@ ThisBuild / version          := "0.1.0-SNAPSHOT"
 ThisBuild / organization     := "io.siunertaq"
 ThisBuild / organizationName := "Siunertaq"
 
-// Scala 3.8 + JDK 17: sun.misc.Unsafe が制限されるため
-// lazy val の新実装に対応した JVM フラグが必要になる場合がある
+// Scala 3.8 + JDK 17: sun.misc.Unsafe is restricted
+// JVM flags may be required for the new lazy val implementation
 ThisBuild / javaOptions ++= Seq(
   "--add-opens", "java.base/java.lang=ALL-UNNAMED",
   "--add-opens", "java.base/java.util=ALL-UNNAMED"
@@ -43,7 +43,7 @@ ThisBuild / javaOptions ++= Seq(
 ThisBuild / fork := true
 
 // =============================================================================
-// バージョン定数
+// Version constants
 // =============================================================================
 
 val PekkoVersion       = "1.4.0"
@@ -55,7 +55,7 @@ val ScalaTestVersion   = "3.2.16"
 val LogbackVersion     = "1.4.11"
 
 // =============================================================================
-// 共通コンパイラオプション (Scala 3.8)
+// Common compiler options (Scala 3.8)
 // =============================================================================
 
 val commonScalacOptions = Seq(
@@ -65,17 +65,17 @@ val commonScalacOptions = Seq(
   "-unchecked",
   "-language:implicitConversions",
   "-language:higherKinds",
-  // Scala 3.8: 厳格パターンマッチ検査
+  // Scala 3.8: strict pattern-match checking
   "-Ycheck-all-patmat",
-  // IO 効果の捨て忘れを警告
+  // Warn about discarding IO effect values
   "-Wvalue-discard",
   "-Wunused:all",
-  // Scala 3.8: SIP-67 厳格等値のパターンマッチ対応
+  // Scala 3.8: SIP-67 strict-equality pattern-match support
   "-language:strictEquality"
 )
 
 // =============================================================================
-// 共通依存ライブラリ
+// Common dependencies
 // =============================================================================
 
 val commonDependencies = Seq(
@@ -84,7 +84,7 @@ val commonDependencies = Seq(
 )
 
 // =============================================================================
-// プロジェクト定義
+// Project definitions
 // =============================================================================
 
 lazy val root = (project in file("."))
@@ -96,12 +96,12 @@ lazy val root = (project in file("."))
   )
 
 // ---------------------------------------------------------------------------
-// core: BSDVertex / BSDArrow クイバー型 + Shake 相当スケジューラ
+// core: BSDVertex / BSDArrow quiver types + Shake-like scheduler
 //
-//   Apache Pekko Streams で有向グラフ (BSDArrow) を
-//   RunnableGraph[Future[Done]] にマッピングする。
-//   Frobenius 矢印 = 前向き依存 (ビルド実行)
-//   Verschiebung 矢印 = 後向き依存 (キャッシュ無効化)
+//   Map directed graphs (BSDArrow) to RunnableGraph[Future[Done]]
+//   using Apache Pekko Streams.
+//   Frobenius arrows = forward dependencies (build execution)
+//   Verschiebung arrows = backward dependencies (cache invalidation)
 // ---------------------------------------------------------------------------
 lazy val core = (project in file("modules/core"))
   .settings(
@@ -129,11 +129,11 @@ lazy val core = (project in file("modules/core"))
   )
 
 // ---------------------------------------------------------------------------
-// z3Bridge: バナッハノルム閾値の SMT 検証
+// z3Bridge: SMT verification of Banach-norm thresholds
 //
-//   import com.microsoft.z3._  がそのまま使える。
-//   io.github.p-org.solvers:z3 は com.microsoft.z3.* を Maven Central で再公開。
-//   Frobenius/Verschiebung 方向制約 + Dieudonné 関係を SMT で検証。
+//   `import com.microsoft.z3._` works as-is.
+//   io.github.p-org.solvers:z3 republishes com.microsoft.z3.* on Maven Central.
+//   Verify Frobenius/Verschiebung directional constraints and Dieudonné relations using SMT.
 // ---------------------------------------------------------------------------
 lazy val z3Bridge = (project in file("modules/z3-bridge"))
   .dependsOn(core)
@@ -146,20 +146,20 @@ lazy val z3Bridge = (project in file("modules/z3-bridge"))
       // ---- 代替: ローカルビルド版 (z3 --java でビルド後 publishLocal) ----
       // "com.microsoft" % "z3" % "4.12.6" from "file:lib/com.microsoft.z3.jar"
     ),
-    // libz3.so + libz3java.so のパス
-    // 今はwsl:  sudo apt install z3  →  /usr/lib/x86_64-linux-gnu/
-    // 環境変数 Z3_LIB_PATH で CI ごとに上書き可能
+    // Path for libz3.so + libz3java.so
+    // Example on WSL: `sudo apt install z3` → /usr/lib/x86_64-linux-gnu/
+    // Override per-CI via the Z3_LIB_PATH environment variable
     javaOptions ++= Seq(
       s"-Djava.library.path=${sys.env.getOrElse("Z3_LIB_PATH", "") }"
     )
   )
 
 // ---------------------------------------------------------------------------
-// yicesBridge: バナッハノルム閾値の Yices 2 クロスチェック
+// yicesBridge: Yices 2 cross-check for Banach-norm thresholds
 //
-//   canonical threshold AST から SMT-LIB2 を生成し、
-//   外部 `yices-smt2` プロセスで SAT/UNSAT を確認する。
-//   Z3 の置き換えではなく、proof artifact 用の並列検証レーンとして使う。
+//   Generate SMT-LIB2 from the canonical threshold AST and
+//   verify SAT/UNSAT using an external `yices-smt2` process.
+//   Used as a parallel verification lane for proof artifacts, not a replacement for Z3.
 // ---------------------------------------------------------------------------
 lazy val yicesBridge = (project in file("modules/yices-bridge"))
   .dependsOn(core)
@@ -170,12 +170,12 @@ lazy val yicesBridge = (project in file("modules/yices-bridge"))
   )
 
 // ---------------------------------------------------------------------------
-// dhallBridge: Dhall REPL 戻り値 → IO 効果登録
+// dhallBridge: Dhall REPL results → IO effect registration
 //
-//   Dhall は Turing 不完全な全域関数言語なので評価が必ず停止する。
-//   この性質を利用して REPL 評価結果を安全に IO 効果として事前登録できる。
-//   実装戦略: dhall-to-json サブプロセス + circe デコード
-//   (JVM 上の Dhall バインディングが薄いため subprocess 戦略が現実的)
+//   Dhall is a total (Turing-incomplete) functional language, so evaluation always terminates.
+//   Leverage this to safely register REPL evaluation results as IO effects ahead of time.
+//   Implementation: dhall-to-json subprocess + circe decoding
+//   (subprocess strategy is practical due to limited JVM Dhall bindings)
 // ---------------------------------------------------------------------------
 lazy val dhallBridge = (project in file("modules/dhall-bridge"))
   .dependsOn(core)
@@ -191,13 +191,12 @@ lazy val dhallBridge = (project in file("modules/dhall-bridge"))
   )
 
 // ---------------------------------------------------------------------------
-// mlirBridge: S式 → MLIR Affine Dialect → JNI → Scala
+// mlirBridge: S-exprs → MLIR Affine Dialect → JNI → Scala
 //
-//   sexpr_angstrom.ml (OCaml / Angstrom) の Scala 3 移植。
-//   Frobenius/Verschiebung 分解された BSDArrow を
-//   mlir::AffineMap のノルム制約として埋め込み、
-//   LLVM IR を経由して JIT 最適化する。
-//   将来的に Clojure ビルドへの対応も想定 (JVM 共通基盤)。
+//   Scala 3 port of sexpr_angstrom.ml (OCaml / Angstrom).
+//   Embed Frobenius/Verschiebung-decomposed BSDArrow as norm constraints on mlir::AffineMap
+//   and JIT-optimize via LLVM IR.
+//   Future support for Clojure builds is planned (shared JVM foundation).
 // ---------------------------------------------------------------------------
 lazy val mlirBridge = (project in file("modules/mlir-bridge"))
   .dependsOn(core, z3Bridge)
@@ -217,13 +216,13 @@ lazy val mlirBridge = (project in file("modules/mlir-bridge"))
   )
 
 // =============================================================================
-// テスト設定
+// Test settings
 // =============================================================================
 
 ThisBuild / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-oDF")
 
 // =============================================================================
-// fat jar — sbt-assembly プラグイン追加時に有効化
+// fat jar — enable when adding the sbt-assembly plugin
 // =============================================================================
 // assembly / mainClass := Some("io.siunertaq.Main")
 // assembly / assemblyMergeStrategy := {
