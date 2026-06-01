@@ -1,0 +1,27 @@
+# SBT / Scala
+/target/
+**/target/
+/project/target/
+/project/boot/
+/.bsp/
+/.bloop/
+
+# Coursier / caches
+/.coursier/
+/.cache/
+
+# IDE
+/.idea/
+*.iml
+.idea_modules
+.classpath
+.project
+/.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+/logs/
+*.log
