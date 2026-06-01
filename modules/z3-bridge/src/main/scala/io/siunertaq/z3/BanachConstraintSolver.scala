@@ -1,7 +1,8 @@
 package io.siunertaq.z3
 
 import com.microsoft.z3.*
-import io.siunertaq.{ BSDVertex, BSDArrow, FVRole }
+import io.siunertaq.{ BSDVertex, BSDArrow }
+import io.siunertaq.threshold.{ ThresholdConstraint, ThresholdNames, ThresholdProblem }
 
 /** Z3 SMT ソルバでバナッハノルム閾値制約を検証する。
   *
@@ -28,6 +29,10 @@ object BanachConstraintSolver:
     arrows: List[BSDArrow],
     prime:  Int = 7
   ): Either[String, String] =
+    verify(ThresholdProblem.fromArrows(arrows, prime))
+
+  /** canonical threshold AST を Z3 で検証する。 */
+  def verify(problem: ThresholdProblem): Either[String, String] =
     // try-with-resources 相当: Context は AutoCloseable
     val ctx    = Context()
     val solver = ctx.mkSolver()
@@ -36,34 +41,26 @@ object BanachConstraintSolver:
       // 頂点ごとのノルム変数
       val normVars: Map[BSDVertex, RealExpr] =
         BSDVertex.values.map { v =>
-          v -> ctx.mkRealConst(v.toString.toLowerCase)
+          v -> ctx.mkRealConst(ThresholdNames.normVar(v))
         }.toMap
 
-      // 非負制約
-      normVars.values.foreach { r =>
-        solver.add(ctx.mkGe(r, ctx.mkReal(0)))
+      problem.constraints.foreach {
+        case ThresholdConstraint.NonNegative(vertex) =>
+          solver.add(ctx.mkGe(normVars(vertex), ctx.mkReal(0)))
+        case ThresholdConstraint.EqualsConstant(vertex, value) =>
+          solver.add(ctx.mkEq(normVars(vertex), ctx.mkReal(value)))
+        case ThresholdConstraint.FrobeniusGE(src, tgt) =>
+          solver.add(ctx.mkGe(normVars(tgt), normVars(src)))
+        case ThresholdConstraint.VerschiebungLE(src, tgt) =>
+          solver.add(ctx.mkLe(normVars(tgt), normVars(src)))
+        case ThresholdConstraint.DieudonneEq(selmer, affine, prime, leech) =>
+          solver.add(
+            ctx.mkEq(
+              ctx.mkMul(normVars(selmer), normVars(affine)),
+              ctx.mkMul(ctx.mkReal(prime), normVars(leech))
+            )
+          )
       }
-
-      // Frobenius: ノルム増加 / Verschiebung: ノルム減少
-      arrows.foreach { arrow =>
-        val src = normVars(arrow.src)
-        val tgt = normVars(arrow.tgt)
-        arrow.role match
-          case FVRole.Frobenius    => solver.add(ctx.mkGe(tgt, src))
-          case FVRole.Verschiebung => solver.add(ctx.mkLe(tgt, src))
-      }
-
-      // Dieudonné 関係: V∘F = [p]
-      // selmer.norm * affine.norm == p * leech.norm
-      val selmer = normVars(BSDVertex.Selmer)
-      val affine = normVars(BSDVertex.AffineDual)
-      val leech  = normVars(BSDVertex.Leech)
-      solver.add(
-        ctx.mkEq(
-          ctx.mkMul(selmer, affine),
-          ctx.mkMul(ctx.mkReal(prime), leech)
-        )
-      )
 
       val res = solver.check()
       if (res != null && res.equals(Status.SATISFIABLE))

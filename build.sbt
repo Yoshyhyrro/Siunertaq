@@ -88,7 +88,7 @@ val commonDependencies = Seq(
 // =============================================================================
 
 lazy val root = (project in file("."))
-  .aggregate(core, z3Bridge, dhallBridge, mlirBridge)
+  .aggregate(core, z3Bridge, yicesBridge, dhallBridge, mlirBridge)
   .settings(
     name           := "Siunertaq",
     publish / skip := true,
@@ -152,6 +152,21 @@ lazy val z3Bridge = (project in file("modules/z3-bridge"))
     javaOptions ++= Seq(
       s"-Djava.library.path=${sys.env.getOrElse("Z3_LIB_PATH", "") }"
     )
+  )
+
+// ---------------------------------------------------------------------------
+// yicesBridge: バナッハノルム閾値の Yices 2 クロスチェック
+//
+//   canonical threshold AST から SMT-LIB2 を生成し、
+//   外部 `yices-smt2` プロセスで SAT/UNSAT を確認する。
+//   Z3 の置き換えではなく、proof artifact 用の並列検証レーンとして使う。
+// ---------------------------------------------------------------------------
+lazy val yicesBridge = (project in file("modules/yices-bridge"))
+  .dependsOn(core)
+  .settings(
+    name := "Siunertaq-yices",
+    scalacOptions ++= commonScalacOptions,
+    libraryDependencies ++= commonDependencies
   )
 
 // ---------------------------------------------------------------------------
