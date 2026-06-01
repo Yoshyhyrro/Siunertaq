@@ -4,22 +4,22 @@ import cats.effect.IO
 import cats.syntax.either.*
 import io.circe.parser.decode
 import io.circe.generic.auto.*
-// fs2.io.process は使用しないため削除
+// fs2.io.process removed because it is not used
 
-/** Dhall REPL 戻り値を IO 効果として登録するレジストリ。
+/** Registry that registers Dhall REPL return values as IO effects.
   *
-  * Dhall は Turing 不完全な全域関数言語なので評価が必ず停止する。
-  * この性質を利用して `dhall-to-json` サブプロセスの出力を
-  * 安全に IO 効果として事前登録できる。
+  * Dhall is a total (Turing-incomplete) functional language, so evaluation always terminates.
+  * Leveraging this property, the output of the `dhall-to-json` subprocess can be
+  * safely registered ahead of time as IO effects.
   *
-  * 実行フロー:
-  *   Dhall式 (*.dhall 内の BanachThreshold リスト)
-  *     → dhall-to-json  (subprocess, fs2.io.process)
-  *     → JSON → circe デコード → List[BanachThreshold]
-  *     → Z3 検証 (z3Bridge)
-  *     → IO[Unit] として BSDArrow.effect に注入
+  * Execution flow:
+  *   Dhall expression (list of BanachThresholds in *.dhall)
+  *     → dhall-to-json (subprocess)
+  *     → JSON → circe decode → List[BanachThreshold]
+  *     → Z3 verification (z3Bridge)
+  *     → inject as `IO[Unit]` into `BSDArrow.effect`
   *
-  * Dhall 記述例 (thresholds.dhall):
+  * Example Dhall (thresholds.dhall):
   * {{{
   *   [ { norm_bound = 12.0, vertex = "AffineDual", effect_tag = "frobenius_compile" }
   *   , { norm_bound = 16.0, vertex = "Selmer",     effect_tag = "verschiebung_cache" }
@@ -28,23 +28,22 @@ import io.circe.generic.auto.*
   */
 object DhallEffectRegistry:
 
-  /** Dhall で記述されるノルム閾値エントリ */
+  /** Norm threshold entry described in Dhall */
   final case class BanachThreshold(
     norm_bound:  Double,
     vertex:      String,
     effect_tag:  String
   )
 
-  /** dhall-to-json バイナリのパスを解決する。
-    * 環境変数 DHALL_TO_JSON が設定されていればそれを使う。
+  /** Resolve the path to the dhall-to-json binary.
+    * Use the DHALL_TO_JSON environment variable if set.
     */
   private def dhallBin: String =
     sys.env.getOrElse("DHALL_TO_JSON", "dhall-to-json")
 
-  /** Dhall 式を `dhall-to-json` で評価して JSON 文字列を返す。
+  /** Evaluate a Dhall expression with `dhall-to-json` and return the JSON string.
     *
-    * fs2.io.process を使うことで Cats Effect の Resource として
-    * プロセスのライフサイクルを管理する。
+    * Using fs2.io.process would allow managing the process lifecycle as a Cats Effect Resource.
     */
   def evalDhall(dhallExpr: String): IO[String] =
     IO.blocking:

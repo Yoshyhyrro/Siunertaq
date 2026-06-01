@@ -53,7 +53,7 @@ object YicesThresholdSolver:
             extractModel(modelResult.stdout)
           }
         case YicesStatus.Unsat =>
-          Left("UNSAT: Yices 2 がノルム制約を充足不能と判定しました")
+          Left("UNSAT: Yices 2 determined the norm constraints are unsatisfiable")
         case YicesStatus.Unknown =>
           Left(s"UNKNOWN: Yices 2 が結論を出せませんでした\n${checkResult.stdout}\n${checkResult.stderr}".trim)
       }
@@ -64,8 +64,8 @@ object YicesThresholdSolver:
       case Some("sat")     => Right(YicesStatus.Sat)
       case Some("unsat")   => Right(YicesStatus.Unsat)
       case Some("unknown") => Right(YicesStatus.Unknown)
-      case Some(other)      => Left(s"Yices 2 status を解釈できません: $other")
-      case None             => Left("Yices 2 から空の応答を受け取りました")
+      case Some(other)      => Left(s"Unable to interpret Yices 2 status: $other")
+      case None             => Left("Received empty response from Yices 2")
 
   def isAvailable: Boolean =
     try
@@ -97,4 +97,4 @@ object YicesThresholdSolver:
         Left(s"yices-smt2 failed (exit $exitCode): $stderr".trim)
     catch
       case err: Throwable =>
-        Left(s"yices-smt2 を起動できませんでした: ${err.getMessage}")
+        Left(s"Failed to start yices-smt2: ${err.getMessage}")
