@@ -1,7 +1,7 @@
 package io.siunertaq.expr
 
 
-// ── Untyped expression ADT (used by ExprTyping, ExprEval, Lowering, SExpr) ──
+// ── Untyped expression ADT ──
 enum Expr:
   case ConstScalar(n: Int)
   case ConstVec3(x: Int, y: Int, z: Int)
@@ -13,10 +13,10 @@ enum Expr:
 enum Instr:
   case PushScalar(n: Int)
   case PushVec3(x: Int, y: Int, z: Int)
-  case AddScalar          // pops two Scalars  → pushes Scalar
-  case AddVec3            // pops two Vec3s    → pushes Vec3
-  case MulScalar          // pops two Scalars  → pushes Scalar
-  case DotVec3            // pops two Vec3s    → pushes Scalar
+  case AddScalar
+  case AddVec3
+  case MulScalar
+  case DotVec3
 
 // ── Type aliases ──
 type Program      = Vector[Instr]
