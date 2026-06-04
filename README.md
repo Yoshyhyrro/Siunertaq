@@ -110,11 +110,5 @@ modules/
 - Richer IR operations and Dhall command-source integration
 - `mlir-bridge`: map `BSDArrow` decompositions to MLIR Affine Dialect norm constraints, JIT via LLVM IR
 
-## Contributing
-
-1. Open an issue before larger design changes.
-2. Branch off `feature/Dependently-typed` (current focus) or the relevant feature branch.
-3. Keep changes focused; prefer lawful additions over convenient ones.
-4. `sbt test` must be green before opening a PR.
 
 Contributions that improve proof coverage, solver reliability, or documentation are especially welcome.
