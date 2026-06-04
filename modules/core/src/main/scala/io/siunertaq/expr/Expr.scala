@@ -19,7 +19,7 @@ object Value:
   given CanEqual[Value, Value] = CanEqual.derived
 
 // Untyped expression ADT (used by ExprTyping, ExprEval, Lowering, SExpr)
-enum Expr:
+enum Expr derives CanEqual:
   case ConstScalar(n: Int)
   case ConstVec3(x: Int, y: Int, z: Int)
   case Add(l: Expr, r: Expr)
