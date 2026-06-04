@@ -18,16 +18,34 @@ final case class Vec3Value(x: Int, y: Int, z: Int) extends Value:
 object Value:
   given CanEqual[Value, Value] = CanEqual.derived
 
-// Expr mirrors Math_Expr.Expr
-// Types are NOT embedded; use ExprTyping.typeOf.
-// First milestone: ConstScalar, ConstVec3, Add, Mul (Scalar×Scalar only), Dot (Vec3×Vec3→Scalar).
-sealed trait Expr
+// Untyped expression ADT (used by ExprTyping, ExprEval, Lowering, SExpr)
+enum Expr derives CanEqual:
+  case ConstScalar(n: Int)
+  case ConstVec3(x: Int, y: Int, z: Int)
+  case Add(l: Expr, r: Expr)
+  case Mul(l: Expr, r: Expr)
+  case Dot(l: Expr, r: Expr)
 
-object Expr:
-  final case class ConstScalar(n: Int)                extends Expr
-  final case class ConstVec3(x: Int, y: Int, z: Int) extends Expr
-  final case class Add(l: Expr, r: Expr)              extends Expr
-  final case class Mul(l: Expr, r: Expr)              extends Expr
-  final case class Dot(l: Expr, r: Expr)              extends Expr
+// Strongly-typed expressions leveraging Generalized Algebraic Data Types (GADT).
+// This ensures that type safety is guaranteed at compile-time,
+// eliminating the need for runtime type checking (e.g., ExprTyping.typeOf).
+//
+// Note: In Scala 3, parameterless enum cases are values, so we use `.type`
+// to refer to their singleton types (e.g., Ty.Scalar.type).
+sealed trait TypedExpr[T <: Ty]
 
-  given CanEqual[Expr, Expr] = CanEqual.derived
+object TypedExpr:
+  final case class TConstScalar(n: Int) extends TypedExpr[Ty.Scalar.type]
+  final case class TConstVec3(x: Int, y: Int, z: Int) extends TypedExpr[Ty.Vec3.type]
+
+  // TAdd is generic over T <: Ty, ensuring we only add Scalar to Scalar or Vec3 to Vec3.
+  final case class TAdd[T <: Ty](l: TypedExpr[T], r: TypedExpr[T]) extends TypedExpr[T]
+
+  // TMul is restricted to Scalar * Scalar -> Scalar.
+  final case class TMul(l: TypedExpr[Ty.Scalar.type], r: TypedExpr[Ty.Scalar.type]) extends TypedExpr[Ty.Scalar.type]
+
+  // TDot takes two Vec3 and returns a Scalar.
+  final case class TDot(l: TypedExpr[Ty.Vec3.type], r: TypedExpr[Ty.Vec3.type]) extends TypedExpr[Ty.Scalar.type]
+
+  // Allow equality checks between typed expressions
+  given [T <: Ty]: CanEqual[TypedExpr[T], TypedExpr[T]] = CanEqual.derived

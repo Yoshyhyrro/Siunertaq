@@ -37,7 +37,7 @@ class LoweringSpec extends AnyFunSpec with Matchers:
     def check(e: Expr): Unit =
       val evalResult  = ExprEval.eval(e)
       val lowerResult = Lowering.lower(e).flatMap(ProgramEval.exec(_))
-      lowerResult shouldBe evalResult
+      (lowerResult shouldBe evalResult):Unit
 
     it("ConstScalar")           { check(Expr.ConstScalar(42)) }
     it("ConstVec3")             { check(Expr.ConstVec3(1, 2, 3)) }
