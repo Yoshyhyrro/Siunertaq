@@ -7,6 +7,7 @@ on:
       - build.sbt
       - modules/core/**
       - modules/z3-bridge/**
+      - modules/dhall-bridge/**          # CondEvaluatorSpec がここに入る
       - modules/batch-bridge/build.sbt
       - modules/yices-bridge/**
       - .github/workflows/yices_test_ci.yml
@@ -15,6 +16,7 @@ on:
       - build.sbt
       - modules/core/**
       - modules/z3-bridge/**
+      - modules/dhall-bridge/**
       - modules/batch-bridge/build.sbt
       - modules/yices-bridge/**
       - .github/workflows/yices_test_ci.yml
@@ -62,11 +64,23 @@ jobs:
           set -euxo pipefail
           yices-smt2 --version
 
+      # CondEvaluator は純粋関数なので Yices 不要・先に単独で実行
+      - name: Run CondEvaluator unit tests (pure; no Yices required)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sbt "dhallBridge/testOnly io.siunertaq.batch.CondEvaluatorSpec"
+
       - name: Run threshold and Yices tests
         shell: bash
         run: |
           set -euxo pipefail
-          sbt "core/testOnly io.siunertaq.threshold.*" "z3Bridge/compile" "yicesBridge/test" "batchBridge/compile"
+          sbt \
+            "core/testOnly io.siunertaq.threshold.*" \
+            "z3Bridge/compile"                       \
+            "yicesBridge/compile"                    \
+            "batchBridge/compile"                    \
+            "yicesBridge/testOnly io.siunertaq.yicesbridge.*"
 
       - name: Upload Yices artifacts on failure
         if: failure()
