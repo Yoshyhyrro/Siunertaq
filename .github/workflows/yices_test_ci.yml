@@ -7,6 +7,7 @@ on:
       - build.sbt
       - modules/core/**
       - modules/z3-bridge/**
+      - modules/batch-bridge/**
       - modules/yices-bridge/**
       - .github/workflows/yices_test_ci.yml
   pull_request:
@@ -14,6 +15,7 @@ on:
       - build.sbt
       - modules/core/**
       - modules/z3-bridge/**
+      - modules/batch-bridge/**
       - modules/yices-bridge/**
       - .github/workflows/yices_test_ci.yml
 
