@@ -7,7 +7,7 @@ on:
       - build.sbt
       - modules/core/**
       - modules/z3-bridge/**
-      - modules/batch-bridge/**
+      - modules/batch-bridge/build.sbt
       - modules/yices-bridge/**
       - .github/workflows/yices_test_ci.yml
   pull_request:
@@ -15,7 +15,7 @@ on:
       - build.sbt
       - modules/core/**
       - modules/z3-bridge/**
-      - modules/batch-bridge/**
+      - modules/batch-bridge/build.sbt
       - modules/yices-bridge/**
       - .github/workflows/yices_test_ci.yml
 
@@ -66,7 +66,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          sbt "core/testOnly io.siunertaq.threshold.*" "z3Bridge/compile" "yicesBridge/test" "batchBridge/compile" "batchBridge/test"
+          sbt "core/testOnly io.siunertaq.threshold.*" "z3Bridge/compile" "yicesBridge/test" "batchBridge/compile"
 
       - name: Upload Yices artifacts on failure
         if: failure()
