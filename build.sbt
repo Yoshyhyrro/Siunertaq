@@ -53,6 +53,8 @@ val CirceVersion       = "0.14.6"
 val Z3Version          = "4.8.14-v5"
 val ScalaTestVersion   = "3.2.16"
 val LogbackVersion     = "1.4.11"
+val SpringBatchVersion = "5.1.2"
+val H2Version          = "2.2.224"
 
 // =============================================================================
 // Common compiler options (Scala 3.8)
@@ -88,7 +90,7 @@ val commonDependencies = Seq(
 // =============================================================================
 
 lazy val root = (project in file("."))
-  .aggregate(core, z3Bridge, yicesBridge, dhallBridge, mlirBridge)
+  .aggregate(core, z3Bridge, yicesBridge, dhallBridge, mlirBridge, batchBridge)
   .settings(
     name           := "Siunertaq",
     publish / skip := true,
@@ -212,6 +214,30 @@ lazy val mlirBridge = (project in file("modules/mlir-bridge"))
     // Ubuntu: sudo apt install llvm-18  →  /usr/lib/llvm-18/lib/
     javaOptions ++= Seq(
       s"-Djava.library.path=${sys.env.getOrElse("MLIR_LIB_PATH", "") }"
+    )
+  )
+
+// ---------------------------------------------------------------------------
+// batchBridge: Spring Batch + Pekko JES2 — BSDQuiver スタックマシン駆動バッチ
+//
+//   Dhall で記述したジョブ定義 (BatchJob.dhall) を dhall-to-json → circe で
+//   BatchJobDef に変換し、Spring Batch Step をPekkoアクターでラップする。
+//   JCL COND 文の代数的セマンティクスを CondEvaluator で実装。
+//   OneForOneStrategy でステップ単位のABEND隔離 (JES2相当)。
+// ---------------------------------------------------------------------------
+lazy val batchBridge = (project in file("modules/batch-bridge"))
+  .dependsOn(core, dhallBridge)
+  .settings(
+    name          := "Siunertaq-batch",
+    scalacOptions ++= commonScalacOptions,
+    libraryDependencies ++= commonDependencies ++ Seq(
+      // Pekko classic Actor (Supervisor Strategy / OneForOneStrategy)
+      "org.apache.pekko"          %% "pekko-actor"       % PekkoVersion,
+      // Spring Batch 5: Step / Tasklet / JobRepository
+      "org.springframework.batch"  % "spring-batch-core" % SpringBatchVersion,
+      "org.springframework"        % "spring-jdbc"        % "6.1.14",
+      // in-memory JobRepository 用 H2
+      "com.h2database"             % "h2"                 % H2Version % Runtime
     )
   )
 

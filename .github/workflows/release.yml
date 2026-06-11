@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'   # v0.0.8, v1.2.3 など
+
+permissions:
+  contents: write   # GitHub Release 作成に必要
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false   # リリースは中断しない
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUN_YICES_SMOKE: "1"
+      YICES_ARTIFACT_DIR: modules/yices-bridge/target/yices-artifacts
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Temurin 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: sbt
+
+      - name: Set up sbt
+        uses: sbt/setup-sbt@v1
+
+      - name: Install Yices 2
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common
+          sudo add-apt-repository -y ppa:sri-csl/formal-methods
+          sudo apt-get update
+          sudo apt-get install -y yices2
+
+      # v0.0.8 → 0.0.8  (sbt version に渡す)
+      - name: Extract version from tag
+        id: ver
+        shell: bash
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      # ─── テスト (失敗したらリリースしない) ──────────────────────────────
+      - name: Run CondEvaluator unit tests
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sbt "dhallBridge/testOnly io.siunertaq.batch.CondEvaluatorSpec"
+
+      - name: Run threshold and Yices tests
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sbt \
+            "core/testOnly io.siunertaq.threshold.*"      \
+            "yicesBridge/testOnly io.siunertaq.yicesbridge.*"
+
+      # ─── JAR ビルド ──────────────────────────────────────────────────────
+      # タグのバージョンで全モジュールをコンパイル
+      # 例: v0.0.8 → Siunertaq-core_3-0.0.8.jar
+      - name: Build JARs
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.ver.outputs.value }}
+        run: |
+          set -euxo pipefail
+          sbt "set ThisBuild / version := \"$RELEASE_VERSION\"" \
+              package
+
+      # ─── 成果物収集 ──────────────────────────────────────────────────────
+      # modules/*/target/scala-*/ 直下のメインJARだけを dist/ に集める
+      # テスト・javadoc・sources JAR は除外
+      - name: Collect JARs into dist/
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p dist
+          find modules/*/target/scala-*/ -maxdepth 1 -name "*.jar" \
+            ! -name "*-tests*"   \
+            ! -name "*-javadoc*" \
+            ! -name "*-sources*" \
+            -exec cp {} dist/ \;
+          echo "=== dist/ ==="
+          ls -lh dist/
+
+      # ─── 失敗時: Yices デバッグ成果物をアップロード ──────────────────────
+      - name: Upload Yices artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yices-threshold-artifacts
+          path: ${{ env.YICES_ARTIFACT_DIR }}
+          if-no-files-found: ignore
+
+      # ─── GitHub Release 作成 ─────────────────────────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Release ${{ github.ref_name }}"
+          generate_release_notes: true   # コミット/PRからリリースノートを自動生成
+          files: dist/*.jar
+          fail_on_unmatched_files: true  # JARがゼロならジョブを失敗させる

@@ -61,7 +61,7 @@ class LoweringSpec extends AnyFunSpec with Matchers:
 
   describe("SExpr round-trip: fromSExpr(toSExpr(e)) == Right(e)") {
     def roundTrip(e: Expr): Unit =
-      SExpr.fromSExpr(SExpr.toSExpr(e)) shouldBe Right(e)
+  (SExpr.fromSExpr(SExpr.toSExpr(e)) shouldBe Right(e)): Unit
 
     it("ConstScalar")  { roundTrip(Expr.ConstScalar(99)) }
     it("ConstVec3")    { roundTrip(Expr.ConstVec3(3, 1, 4)) }
