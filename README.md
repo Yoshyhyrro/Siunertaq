@@ -8,7 +8,7 @@
 A Scala 3 project for formalising Banach quiver threshold verification and a small arithmetic IR proof pipeline, designed to stay honest about effects and never lie to the type system.
 
 The repository combines:
-- a `core` module for build-graph primitives, a minimal arithmetic IR, and a GADT-based typed expression layer,
+- a `core` module for build-graph primitives and a minimal arithmetic IR,
 - a `z3-bridge` module for Z3-based Banach constraint verification,
 - a `yices-bridge` module for Yices 2 SMT cross-checking,
 - a `dhall-bridge` module for total Dhall input evaluation via `cats-effect`,
@@ -65,30 +65,12 @@ Invalid execution orders — such as a recovery step marked `Only` running when 
 `JobSupervisorActor` manages a tree of `StepExecutorActor` instances under a Pekko `OneForOneStrategy`.
 When a step throws `StepAbended`, only that actor is stopped; all sibling steps continue unaffected.
 This design takes inspiration from z/OS JES2-style step-level fault isolation, where an individual step ABEND does not cascade into a full job failure unless the subsequent COND logic dictates it.
-## Typed expressions — `TypedExpr[T]`
-
-The arithmetic IR ships two layers:
-
-| Layer | Type | Purpose |
-|---|---|---|
-| `Expr` (untyped) | ADT | Used by `ExprTyping`, `ExprEval`, `Lowering`, `SExpr` |
-| `TypedExpr[T <: Ty]` (GADT) | Indexed type | Compile-time safety; eliminates runtime `ExprTyping.typeOf` checks |
-
-`TypedExpr` uses Scala 3 GADTs to encode type-index constraints directly:
-
-- `TAdd[T]` — homogeneous addition for any `T <: Ty` (Scalar + Scalar or Vec3 + Vec3, never mixed)
-- `TMul` — `Scalar × Scalar → Scalar` only; Vec3 multiplication is a compile error
-- `TDot` — `Vec3 × Vec3 → Scalar` only; the result type is fixed at the constructor
-
-Because `Ty.Scalar` and `Ty.Vec3` are parameterless enum cases in Scala 3, their singleton types (`Ty.Scalar.type`, `Ty.Vec3.type`) serve as the index. A `TDot` node can never carry a `Vec3`-typed result without a compile error — no runtime check required.
 
 ## Why two solvers?
 
 Z3 and Yices 2 run as independent verification lanes over the same canonical `ThresholdProblem` AST. Agreement is a stronger signal than a single SAT verdict; each solver produces a *proof artifact* that can be checked independently — useful once the project gains SPARK/Ada packages that need external witnesses.
 
 The two bridges are deliberately kept at arm's length: `z3-bridge` links against the Z3 JNI library; `yices-bridge` shells out to `yices-smt2`. Neither knows the other exists.
-
-The `feature/Dependently-typed` branch strengthens the Yices 2 SMT encoding so that the dependent-type index carried by each `TypedExpr[T]` node flows through the constraint pipeline, keeping solver witnesses structurally aligned with typed IR nodes.
 
 ## Requirements
 
@@ -127,9 +109,7 @@ RUN_YICES_SMOKE=1 sbt "yicesBridge/test"
 modules/
   core/
     src/main/scala/io/siunertaq/
-      expr/           — untyped arithmetic ADTs (Expr, Instr, Program, MachineStack),
-                        GADT-based TypedExpr[T <: Ty] for compile-time type safety,
-                        stack-machine lowering, evaluator, and S-expression codec
+      expr/           — arithmetic ADTs, a stack-machine lowering, evaluator, and S-expression codec
       threshold/      — constraint AST, canonical S-expression support, solver input generation
   z3-bridge/          — Z3-backed Banach constraint verification (JNI)
   yices-bridge/       — Yices 2 cross-check lane (subprocess) + smoke tests
@@ -140,9 +120,6 @@ modules/
       dhall/          — DhallEffectRegistry: Dhall → IO effect registration
       batch/          — BatchJobDef, DhallBatchRegistry, CondEvaluator
   batch-bridge/       — Spring Batch + Pekko JES2; StackMachineTasklet, StepExecutorActor, JobSupervisorActor
-  yices-bridge/       — Yices 2 cross-check lane (subprocess) + smoke tests;
-                        feature/Dependently-typed strengthens dependent-type index propagation
-  dhall-bridge/       — total Dhall evaluation → circe decode → IO effect registration
   mlir-bridge/        — planned MLIR / Affine Dialect integration
 .github/workflows/
   yices_test_ci.yml   — CI: installs Yices 2, runs threshold + solver + CondEvaluator tests
@@ -152,10 +129,7 @@ modules/
 ## Current status
 
 - Arithmetic IR and threshold AST implemented; all core tests passing.
-- `TypedExpr[T <: Ty]` GADT layer implemented: compile-time type safety for scalar/vec3 arithmetic, eliminating runtime `ExprTyping.typeOf` checks.
-- `LoweringSpec` updated to cover typed expression nodes and extended preservation proofs.
-- Dependent-type index propagation in the Yices 2 bridge in progress on `feature/Dependently-typed`.
-- Yices and Z3 verification lanes remain separated and independently runnable.
+- Yices and Z3 verification lanes separated and independently runnable.
 - GitHub Actions CI validates the Yices path on `ubuntu-latest` with the real solver binary.
 - Codebase prepared for SPARK/Ada proof packages: `lower` and S-expression round-trips already have ScalaTest specs that serve as ground-truth witnesses.
 - `batch-bridge` implemented: `BatchJob.dhall` → `BatchJobDef` → Spring Batch step execution driven by the BSD Quiver stack machine, with JCL-inspired `CondExpr` execution control and Pekko `OneForOneStrategy` fault isolation.
@@ -168,9 +142,13 @@ modules/
 - Richer IR operations and deeper Dhall REPL integration — live step modification without restarting the JVM
 - Parallel step dispatch in `JobSupervisorActor` for steps sharing the same `priority` value
 - Yices-verified norm thresholds wired directly into `StepExecutorActor` pre-conditions, so a step that would violate a BSD norm bound is rejected before Spring Batch ever runs it
-- Typed lowering: `TypedExpr[T] → Program` that carries the GADT index through to the stack-machine encoding
-- Richer IR operations and Dhall command-source integration
 - `mlir-bridge`: map `BSDArrow` decompositions to MLIR Affine Dialect norm constraints, JIT via LLVM IR
 
+## Contributing
+
+1. Open an issue before larger design changes.
+2. Branch off `feature/Refinement_dhall` or the relevant feature branch.
+3. Keep changes focused; prefer lawful additions over convenient ones.
+4. `sbt test` must be green before opening a PR.
 
 Contributions that improve proof coverage, solver reliability, or documentation are especially welcome.
