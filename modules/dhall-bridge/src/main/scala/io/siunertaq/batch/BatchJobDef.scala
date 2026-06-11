@@ -88,7 +88,7 @@ object StepDef:
       effectTag  <- c.downField("effect_tag").as[String]
       cond       <- c.downField("cond").as[Option[CondExpr]]
       normVertex <- c.downField("norm_vertex")
-                     .as(Decoder.instance(decodeVertexTag))
+               .as(using Decoder.instance(decodeVertexTag))
       inputProg  <- c.downField("input_prog").as[List[Instr]].map(_.toVector)
       priority   <- c.downField("priority").as[Int]
     yield StepDef(name, effectTag, cond, normVertex, inputProg, priority)
