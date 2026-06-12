@@ -1,33 +1,32 @@
 {-|  modules/batch-bridge/src/main/resources/BatchJob.dhall
 
-     JCL COND文の代数的セマンティクスをDhallの全域関数で完全表現。
-     BSDQuiverスタックマシン命令列を各ステップの「入力プログラム」として
-     埋め込み、Dhall REPL または dhall-to-json 経由で
-     Spring Batch + Pekko JES2 に渡す。
+     Complete representation of JCL COND statement algebraic semantics via Dhall total functions.
+     Embeds a sequence of BSDQuiver stack machine instructions as an "input program" for each step,
+     which is then passed to Spring Batch + Pekko JES2 via the Dhall REPL or dhall-to-json.
 
-     Dhall REPL での対話的利用:
+     Interactive usage in Dhall REPL:
        siunertaq> :load ./BatchJob.dhall
-       siunertaq> :let myStep = ...   -- ステップをその場で追加・変更
+       siunertaq> :let myStep = ...   -- Add or modify steps on the fly
 
-     dhall-to-json での利用:
+     Usage via dhall-to-json:
        dhall-to-json --file BatchJob.dhall | SiunertaqBatchApp
 -}
 
--- JCL COND=(threshold, op): threshold op previousRC が真ならスキップ
+-- JCL COND=(threshold, op): skip the step if "threshold op previousRC" evaluates to True
 let CondOp = < LT | LE | EQ | NE | GT | GE >
 
--- COND式: Compare=比較スキップ / Even=必ず実行 / Only=ABEND時のみ実行
+-- COND Expression: Compare = conditional skip / Even = execute always / Only = execute only on ABEND
 let CondExpr =
       < Compare : { threshold : Natural, op : CondOp }
       | Even    : {}
       | Only    : {}
-      >
+      | >
 
--- BSDVertex のDhallミラー (Scala enum .toString() と一致)
+-- Dhall mirror of BSDVertex (matches Scala enum .toString())
 let BSDVertexTag = < Leech | AffineDual | Padic | Selmer >
 
--- io.siunertaq.expr.Instr のDhallミラー
--- 無引数構成子は {} でunit化 (dhall-to-json: {"AddScalar": {}})
+-- Dhall mirror of io.siunertaq.expr.Instr
+-- Nullary constructors are unitized with {} (e.g., dhall-to-json: {"AddScalar": {}})
 let StackInstr =
       < PushScalar : { n : Natural }
       | PushVec3   : { x : Natural, y : Natural, z : Natural }
@@ -38,21 +37,21 @@ let StackInstr =
       >
 
 let StepDef =
-      { name        : Text             -- Spring Batch Step名
-      , effect_tag  : Text             -- BSDArrow.effect_tag (REPL連携キー)
+      { name        : Text              -- Spring Batch step name
+      , effect_tag  : Text              -- BSDArrow.effect_tag (REPL integration key)
       , cond        : Optional CondExpr
-      , norm_vertex : BSDVertexTag     -- Yices閾値検証対象頂点
-      , input_prog  : List StackInstr  -- スタックマシン入力プログラム
-      , priority    : Natural          -- Pekkoアクター起動優先度 (JCL PRTY相当)
+      , norm_vertex : BSDVertexTag      -- Target vertex for Yices threshold verification
+      , input_prog  : List StackInstr  -- Stack machine input program
+      , priority    : Natural           -- Pekko actor execution priority (analogous to JCL PRTY)
       }
 
 let BatchJobDef =
       { job_name : Text
-      , prime    : Natural             -- Dieudonne素数 (BSD閾値検証用)
+      , prime    : Natural              -- Dieudonné prime (used for BSD threshold verification)
       , steps    : List StepDef
       }
 
--- ヘルパー: Compare COND を短く書く
+-- Helper: Short-hand helper to construct a Compare COND expression
 let mkCond =
       \(t : Natural) -> \(op : CondOp) ->
         Some (CondExpr.Compare { threshold = t, op = op })
@@ -60,7 +59,7 @@ let mkCond =
 in    { job_name = "SiunertaqBatch"
       , prime    = 7
       , steps    =
-          [ -- STEP1: Leech → AffineDual (Frobenius; 常に実行)
+          [ -- STEP1: Leech -> AffineDual (Frobenius; executes always)
             { name        = "frobenius-compile"
             , effect_tag  = "tensor_bang"
             , cond        = None CondExpr
@@ -72,10 +71,10 @@ in    { job_name = "SiunertaqBatch"
                 ]
             , priority    = 1
             }
-          , -- STEP2: AffineDual → Padic (Frobenius; 前RC>4でスキップ)
+          , -- STEP2: AffineDual -> Padic (Frobenius; skip if previous RC > 4)
             { name        = "padic-lower"
             , effect_tag  = "oplus_padic"
-            , cond        = mkCond 4 CondOp.LT   -- COND=(4,LT): 4<前RC → skip
+            , cond        = mkCond 4 CondOp.LT   -- COND=(4,LT): skip if 4 < previous RC
             , norm_vertex = BSDVertexTag.Padic
             , input_prog  =
                 [ StackInstr.PushVec3 { x = 2, y = 4, z = 0 }
@@ -84,15 +83,15 @@ in    { job_name = "SiunertaqBatch"
                 ]
             , priority    = 2
             }
-          , -- STEP3: Leech → Selmer (Verschiebung; 前RC≠0でスキップ)
+          , -- STEP3: Leech -> Selmer (Verschiebung; skip if previous RC != 0)
             { name        = "selmer-project"
             , effect_tag  = "project_selmer"
-            , cond        = mkCond 0 CondOp.NE   -- COND=(0,NE): 前RC≠0 → skip
+            , cond        = mkCond 0 CondOp.NE   -- COND=(0,NE): skip if previous RC != 0
             , norm_vertex = BSDVertexTag.Selmer
             , input_prog  = [ StackInstr.PushScalar { n = 16 } ]
             , priority    = 2
             }
-          , -- STEP4: リカバリ (Verschiebung; ABEND時のみ実行 = COND=ONLY)
+          , -- STEP4: Recovery (Verschiebung; executes only on ABEND = COND=ONLY)
             { name        = "cache-recover"
             , effect_tag  = "recover"
             , cond        = Some (CondExpr.Only {})
