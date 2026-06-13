@@ -90,7 +90,7 @@ val commonDependencies = Seq(
 // =============================================================================
 
 lazy val root = (project in file("."))
-  .aggregate(core, z3Bridge, yicesBridge, dhallBridge, mlirBridge, batchBridge)
+  .aggregate(core, z3Bridge, yicesBridge, dhallBridge, mlirBridge, batchBridge, petersenMzv)
   .settings(
     name           := "Siunertaq",
     publish / skip := true,
@@ -238,6 +238,36 @@ lazy val batchBridge = (project in file("modules/batch-bridge"))
       "org.springframework"        % "spring-jdbc"        % "6.1.14",
       // in-memory JobRepository 用 H2
       "com.h2database"             % "h2"                 % H2Version % Runtime
+    )
+  )
+
+// ---------------------------------------------------------------------------
+// examples/petersen-mzv: MZV depth-3 solver on the Petersen graph
+//
+//   Demonstrates the Petersen graph as a MZV stack machine:
+//   - diameter-2 invariant (P1/UNSAT) → [TOPOLOGY ???] is dead code
+//   - s1=1 divergent pole (P5/UNSAT)  → [IMAGINARY ???] dispatched to ImaginaryPopperActor
+//   - s2+s3 weight conservation (P2/UNSAT) across any pentagon step
+//   - SMT-LIB 2 generation via scala-smtlib + z3 subprocess verification
+//
+//   Parallel to yicesBridge (subprocess SMT) rather than z3Bridge (Java API).
+//
+//   scala-smtlib: published for Scala 2.13 only as of 0.2.1.
+//   CrossVersion.for3Use2_13 required until upstream publishes a Scala 3 artifact.
+//   Tracked at: https://github.com/regb/scala-smtlib/issues/???
+// ---------------------------------------------------------------------------
+lazy val petersenMzv = (project in file("examples/petersen-mzv"))
+  .dependsOn(core)
+  .settings(
+    name := "petersen-mzv",
+    scalacOptions ++= commonScalacOptions,
+    libraryDependencies ++= commonDependencies ++ Seq(
+      // classic Actor for ImaginaryPopperActor (transitive via core's pekko-actor-typed,
+      // listed explicitly for clarity — mirrors batchBridge convention)
+      "org.apache.pekko" %% "pekko-actor"       % PekkoVersion,
+      // scala-smtlib: typed SMT-LIB 2 AST + RecursivePrinter
+      // CrossVersion needed until a native Scala 3 artifact is published upstream
+      "com.regblanc"     %  "scala-smtlib_2.13" % "0.2.1" cross CrossVersion.for3Use2_13
     )
   )
 
