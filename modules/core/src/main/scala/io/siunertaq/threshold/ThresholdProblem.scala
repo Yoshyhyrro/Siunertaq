@@ -15,7 +15,7 @@ final case class ThresholdProblem(
 
 object ThresholdProblem:
 
-  def fromArrows(arrows: List[BSDArrow], prime: Int = 7): ThresholdProblem =
+  def fromArrows(arrows: List[BSDArrow[?, ?]], prime: Int = 7): ThresholdProblem =
     val nonNegative = BSDVertex.values.toVector.map(ThresholdConstraint.NonNegative.apply)
     val monotonic = arrows.toVector.map {
       case BSDArrow(src, tgt, FVRole.Frobenius, _) =>
