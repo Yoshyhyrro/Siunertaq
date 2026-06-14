@@ -12,7 +12,7 @@ on:
       - modules/dhall-bridge/**          # CondEvaluatorSpec がここに入る
       - modules/batch-bridge/build.sbt
       - modules/yices-bridge/**
-      - examples/**                      # examples の変更もテストに影響する可能性があるため
+      - examples/**               # examples の変更もテストに影響する可能性があるため
       - .github/workflows/yices_test_ci.yml
   pull_request:
     paths:
