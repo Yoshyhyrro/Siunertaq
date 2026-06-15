@@ -1,8 +1,11 @@
 package io.siunertaq.carabiner
 
 import cats.effect.{ IO, Ref }
+import io.siunertaq.GolayWeight                                  // canonical; defined in BSDQuiver.scala
 import io.siunertaq.yangbaxter.{ SpiralRotation, spiralToSpectralParam }
 import scala.math.{ atan2, pow }
+// Note: GolayWeight extension methods (berkovichHeight, orbitSize, complement)
+// are defined in Carabiner.scala (same package); no extra import needed.
 
 // ─── §0  ComplexWeight ───────────────────────────────────────────────────────
 
