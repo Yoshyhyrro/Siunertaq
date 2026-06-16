@@ -15,14 +15,22 @@ final case class ThresholdProblem(
 
 object ThresholdProblem:
 
-  def fromArrows(arrows: List[BSDArrow[?, ?]], prime: Int = 7): ThresholdProblem =
+  def fromArrows(arrows: List[BSDArrow[? <: BSDVertex, ? <: BSDVertex]], prime: Int = 7): ThresholdProblem =
     val nonNegative = BSDVertex.values.toVector.map(ThresholdConstraint.NonNegative.apply)
-    val monotonic = arrows.toVector.map {
-      case BSDArrow(src, tgt, FVRole.Frobenius, _) =>
-        ThresholdConstraint.FrobeniusGE(src, tgt)
-      case BSDArrow(src, tgt, FVRole.Verschiebung, _) =>
-        ThresholdConstraint.VerschiebungLE(src, tgt)
+
+    // "Pop" the .role field out of each arrow.
+    //
+    // BSDArrow is a parameterised enum with no unapply, so
+    //   case BSDArrow(src, tgt, FVRole.Frobenius, _) =>   ← ILLEGAL
+    // does not compile.  Instead we access .role directly; the compiler
+    // knows a.src / a.tgt are subtypes of BSDVertex from the bound
+    // [Src <: BSDVertex, Tgt <: BSDVertex], so no cast is needed.
+    val monotonic = arrows.toVector.map { a =>
+      a.role match
+        case FVRole.Frobenius    => ThresholdConstraint.FrobeniusGE(a.src, a.tgt)
+        case FVRole.Verschiebung => ThresholdConstraint.VerschiebungLE(a.src, a.tgt)
     }
+
     val dieudonne = Vector(
       ThresholdConstraint.DieudonneEq(
         BSDVertex.Selmer,
