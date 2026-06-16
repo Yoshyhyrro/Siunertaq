@@ -2,7 +2,7 @@ package io.siunertaq.yices
 
 import java.nio.charset.StandardCharsets
 
-import io.siunertaq.BSDArrow
+import io.siunertaq.{ BSDArrow, BSDVertex }
 import io.siunertaq.threshold.{ ThresholdConstraint, ThresholdNames, ThresholdProblem }
 
 enum YicesStatus derives CanEqual:
