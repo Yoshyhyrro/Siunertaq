@@ -73,6 +73,17 @@ enum BSDArrow[Src <: BSDVertex, Tgt <: BSDVertex](
   case Recover(eff: IO[Unit])
       extends BSDArrow[Selmer.type, AffineDual.type](Selmer, AffineDual, FVRole.Verschiebung, eff)
 
+// Companion object: lowercase smart constructors used by ThresholdSExprSpec,
+// ThresholdSExprCodec, and any batch-level code that builds arrow lists at runtime.
+// The enum cases (TensorBang, OplusPadic, …) carry precise phantom types;
+// the smart constructors widen to concrete-but-still-phantom return types so
+// callers can name them without spelling out the Src/Tgt type arguments.
+object BSDArrow:
+  def tensorBang(eff: IO[Unit]): BSDArrow[Leech.type, AffineDual.type] = TensorBang(eff)
+  def oplusPadic(eff: IO[Unit]): BSDArrow[AffineDual.type, Padic.type] = OplusPadic(eff)
+  def projectSelmer(eff: IO[Unit]): BSDArrow[Leech.type, Selmer.type]  = ProjectSelmer(eff)
+  def recover(eff: IO[Unit]): BSDArrow[Selmer.type, AffineDual.type]   = Recover(eff)
+
 /** Connection to Golay Weight Quiver */
 def bsdVertexToGolayWeight(v: BSDVertex): GolayWeight = v match
   case Leech      => GolayWeight.W0
