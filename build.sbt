@@ -271,6 +271,16 @@ lazy val petersenMzv = (project in file("examples/petersen-mzv"))
     )
   )
 
+lazy val postgresBridge = (project in file("modules/postgres-bridge"))
+  .dependsOn(core)
+  .settings(
+    name := "Siunertaq-postgres",
+    scalacOptions ++= commonScalacOptions,
+    libraryDependencies ++= commonDependencies ++ Seq(
+      "org.postgresql" % "postgresql" % "42.6.0"
+    )
+  )
+
 // =============================================================================
 // Test settings
 // =============================================================================

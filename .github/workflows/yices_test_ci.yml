@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - example/jvm-mzv
+      - example/feature/jvm-mzv_postgres-bridge
     paths:
       - build.sbt
       - modules/core/**
@@ -13,6 +13,7 @@ on:
       - modules/batch-bridge/build.sbt
       - modules/yices-bridge/**
       - examples/**               # examples の変更もテストに影響する可能性があるため
+      - modules/postgres-bridge/**  # postgres-bridge の変更もテストに影響する可能性があるため
       - .github/workflows/yices_test_ci.yml
   pull_request:
     paths:
@@ -23,6 +24,7 @@ on:
       - modules/batch-bridge/build.sbt
       - modules/yices-bridge/**
       - examples/**                      # examples の変更もテストに影響する可能性があるため
+      - modules/postgres-bridge/**       # postgres-bridge の変更もテストに影響する可能性があるため
       - .github/workflows/yices_test_ci.yml
 
 permissions:
