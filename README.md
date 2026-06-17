@@ -339,7 +339,7 @@ modules/
 ## Contributing
 
 1. Open an issue before larger design changes.
-2. Branch off `feature/Refinement_dhall` or the relevant feature branch.
+2. Branch off `example/jvm-mzv` or the relevant feature branch.
 3. Keep changes focused; prefer lawful additions over convenient ones.
 4. `sbt test` must be green before opening a PR.
 
