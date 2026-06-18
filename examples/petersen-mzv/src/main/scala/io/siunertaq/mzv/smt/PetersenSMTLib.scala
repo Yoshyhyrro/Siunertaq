@@ -218,7 +218,7 @@ object PetersenSMTLib:
   /** Full verification suite — pass to PetersenSmtSolver.verify(renderSuite()) */
   def renderSuite(): String =
     toSMT2(
-      Seq(SetLogic(Logic(SSymbol("QF_LIA"))), SetOption(ProduceModels(true))) ++
+      Seq(SetLogic(QF_LIA.asInstanceOf[Logic]), SetOption(ProduceModels(true))) ++
       sharedDefs ++
       propDiameter ++
       propWeightConservation ++
@@ -230,7 +230,7 @@ object PetersenSMTLib:
   /** Single property with shared preamble — for targeted debugging */
   def renderProperty(cmds: Seq[Command]): String =
     toSMT2(
-      Seq(SetLogic(QF_LIA), SetOption(ProduceModels(true))) ++
+      Seq(SetLogic(QF_LIA.asInstanceOf[Logic]), SetOption(ProduceModels(true))) ++
       sharedDefs ++ cmds ++ Seq(Exit()))
 
   private def toSMT2(cmds: Seq[Command]): String =
