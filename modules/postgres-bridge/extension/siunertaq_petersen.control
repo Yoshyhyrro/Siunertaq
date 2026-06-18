@@ -1,0 +1,6 @@
+# siunertaq_petersen.control
+# Petersen graph / MZV vertex tables — requires siunertaq_forth for bsd_vertex ENUM
+comment     = 'Petersen MZV vertex distribution over BSD quiver vertices'
+default_version = '1.0'
+relocatable = true
+requires    = 'siunertaq_forth'

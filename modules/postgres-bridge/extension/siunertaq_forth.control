@@ -1,0 +1,5 @@
+# siunertaq_forth.control
+# Pure SQL extension — no C library required.
+comment     = 'BSD Quiver Forth compilation engine for JVM/Spring Batch step programs'
+default_version = '1.0'
+relocatable = true

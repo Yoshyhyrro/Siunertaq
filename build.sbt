@@ -277,7 +277,9 @@ lazy val postgresBridge = (project in file("modules/postgres-bridge"))
     name := "Siunertaq-postgres",
     scalacOptions ++= commonScalacOptions,
     libraryDependencies ++= commonDependencies ++ Seq(
-      "org.postgresql" % "postgresql" % "42.6.0"
+      "org.postgresql" % "postgresql" % "42.7.3",
+      "org.tpolecat" %% "doobie-core" % "1.0.0-RC2",
+      "org.tpolecat" %% "skunk-core" % "1.0.0-RC2"
     )
   )
 
