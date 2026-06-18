@@ -83,6 +83,6 @@ class MZVMachineBean @Autowired() (
 
   // ── @BeanProperty-style accessors (Java / Spring EL interop) ────────────
 
-  def getS1(triple: MZVTriple): Int = triple.getS1
-  def getS2(triple: MZVTriple): Int = triple.getS2
-  def getS3(triple: MZVTriple): Int = triple.getS3
+  def getS1(triple: MZVTriple): Int = triple.s1
+  def getS2(triple: MZVTriple): Int = triple.s2
+  def getS3(triple: MZVTriple): Int = triple.s3

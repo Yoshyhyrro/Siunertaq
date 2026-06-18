@@ -218,7 +218,7 @@ object PetersenSMTLib:
   /** Full verification suite — pass to PetersenSmtSolver.verify(renderSuite()) */
   def renderSuite(): String =
     toSMT2(
-      Seq(SetLogic(QF_LIA), SetOption(ProduceModels(true))) ++
+      Seq(SetLogic(Logic(SSymbol("QF_LIA"))), SetOption(ProduceModels(true))) ++
       sharedDefs ++
       propDiameter ++
       propWeightConservation ++

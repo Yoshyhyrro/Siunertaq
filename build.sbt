@@ -267,7 +267,8 @@ lazy val petersenMzv = (project in file("examples/petersen-mzv"))
       "org.apache.pekko" %% "pekko-actor"       % PekkoVersion,
       // scala-smtlib: typed SMT-LIB 2 AST + RecursivePrinter
       // CrossVersion needed until a native Scala 3 artifact is published upstream
-      "com.regblanc" % "scala-smtlib" % "0.2.1-42-gc68dbaa" cross CrossVersion.for3Use2_13
+      "com.regblanc" % "scala-smtlib" % "0.2.1-42-gc68dbaa" cross CrossVersion.for3Use2_13,
+      "org.springframework" % "spring-context" % "6.1.14"
     )
   )
 

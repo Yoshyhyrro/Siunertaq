@@ -64,7 +64,7 @@ final class PetersenFluidMachine:
     if !triple.isConvergent then
       IO.raiseError(DivergentPoleException(triple))   // [IMAGINARY ???]
     else
-      val delta = if src.getClass != tgt.getClass then 1 else -1
+      val delta = if src.getClass.getName != tgt.getClass.getName then 1 else -1
       IO.pure(MZVTriple(triple.s1, triple.s2 + delta, triple.s3 - delta))
 
   /**
