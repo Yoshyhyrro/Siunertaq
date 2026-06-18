@@ -90,7 +90,7 @@ val commonDependencies = Seq(
 // =============================================================================
 
 lazy val root = (project in file("."))
-  .aggregate(core, z3Bridge, yicesBridge, dhallBridge, mlirBridge, batchBridge, petersenMzv)
+  .aggregate(core, z3Bridge, yicesBridge, dhallBridge, mlirBridge, batchBridge, petersenMzv, postgresBridge)
   .settings(
     name           := "Siunertaq",
     publish / skip := true,
@@ -277,6 +277,7 @@ lazy val postgresBridge = (project in file("modules/postgres-bridge"))
     name := "Siunertaq-postgres",
     scalacOptions ++= commonScalacOptions,
     libraryDependencies ++= commonDependencies ++ Seq(
+      "org.typelevel"  %% "cats-effect"   % CatsEffectVersion,
       "org.postgresql" % "postgresql" % "42.7.3",
       "org.tpolecat" %% "doobie-core" % "1.0.0-RC2",
       "org.tpolecat" %% "skunk-core" % "1.0.0-RC2"
