@@ -280,7 +280,8 @@ lazy val postgresBridge = (project in file("modules/postgres-bridge"))
       "org.typelevel"  %% "cats-effect"   % CatsEffectVersion,
       "org.postgresql" % "postgresql" % "42.7.3",
       "org.tpolecat" %% "doobie-core" % "1.0.0-RC2",
-      "org.tpolecat" %% "skunk-core" % "0.6.5"
+      "org.tpolecat" %% "skunk-core" % "0.6.5",
+      "org.ow2.asm"    % "asm"         % "9.7"
     )
   )
 
