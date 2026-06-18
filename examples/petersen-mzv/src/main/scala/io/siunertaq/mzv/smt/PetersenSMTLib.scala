@@ -170,7 +170,7 @@ object PetersenSMTLib:
     Assert(Equals(sym("p4_out_s2"), int(2))),
     Assert(Equals(sym("p4_out_s3"), int(1))),
     CheckSat(),
-    GetValue(Seq(sym("p4_mid_s2"), sym("p4_mid_s3"), sym("p4_out_s2"), sym("p4_out_s3"))),
+    GetValue(sym("p4_mid_s2"), Seq(sym("p4_mid_s3"), sym("p4_out_s2"), sym("p4_out_s3"))),
     Pop(1))
 
   /**
