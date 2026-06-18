@@ -80,7 +80,7 @@ final class PetersenFluidMachine:
       if current.equals(goal) then IO.pure(cur)
       else
         val nextOpt = getNeighbors(current)
-          .find(v => v == goal || getNeighbors(v).contains(goal))
+          .find(v => v.equals(goal) || getNeighbors(v).exists(_.equals(goal)))
         nextOpt match
           case None =>
             IO.raiseError(TopologyException(current, goal))  // [TOPOLOGY ???] dead code
