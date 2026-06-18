@@ -77,7 +77,7 @@ final class PetersenFluidMachine:
   def resolveStack(triple: MZVTriple, start: Vertex, goal: Vertex): IO[MZVTriple] =
 
     def step(current: Vertex, cur: MZVTriple): IO[MZVTriple] =
-      if current == goal then IO.pure(cur)
+      if current.equals(goal) then IO.pure(cur)
       else
         val nextOpt = getNeighbors(current)
           .find(v => v == goal || getNeighbors(v).contains(goal))
