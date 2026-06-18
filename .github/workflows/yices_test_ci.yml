@@ -85,6 +85,8 @@ jobs:
             "z3Bridge/compile"                       \
             "yicesBridge/compile"                    \
             "batchBridge/compile"                    \
+            "postgresBridge/compile"                 \
+            "petersenMzv/compile"                    \
             "yicesBridge/testOnly io.siunertaq.yicesbridge.*"
 
       - name: Upload Yices artifacts on failure
