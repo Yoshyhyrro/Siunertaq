@@ -13,7 +13,148 @@ The repository combines:
 - a `yices-bridge` module for Yices 2 SMT cross-checking,
 - a `dhall-bridge` module for total Dhall input evaluation via `cats-effect`,
 - a `batch-bridge` module for JCL-inspired step orchestration via Apache Pekko and Spring Batch,
+- a `petersen-mzv` module for MZV depth-3 reduction on the Petersen graph with full SMT verification, and
 - a planned `mlir-bridge` module for future MLIR integration.
+
+## Modules
+
+| Module | Role | Key Types |
+|---|---|---|
+| `core` | BSD quiver, Golay lattice, arithmetic IR, threshold AST | `BSDArrow`, `GolayWeight`, `PhantomCarabiner`, `Expr` |
+| `z3-bridge` | Z3 JNI Banach constraint solver | `BanachConstraintSolver` |
+| `yices-bridge` | Yices 2 SMT cross-check lane + smoke tests | `YicesThresholdSolver`, `YicesSmtLib` |
+| `dhall-bridge` | Dhall → JSON → Scala batch job decoder | `BatchJobDef`, `CondEvaluator`, `DhallBatchRegistry` |
+| `batch-bridge` | JCL/JES2-style Pekko + Spring Batch orchestration | `JobSupervisorActor`, `StepExecutorActor`, `StackMachineTasklet` |
+| `petersen-mzv` | MZV depth-3 reduction on the Petersen phase graph | `PetersenFluidMachine`, `ImaginaryPopperActor`, `MZVMachineBean` |
+| `mlir-bridge` | *(planned)* MLIR / Affine Dialect integration | — |
+
+---
+
+## Mathematical Foundations: MZV and the `petersen-mzv` Module
+
+### Multiple Zeta Values — Furusho's Framework
+
+**Multiple zeta values (MZVs)** of depth $k$ and weight $n$ are defined by the nested sum:
+
+$$\zeta(s_1, s_2, \ldots, s_k) = \sum_{n_1 > n_2 > \cdots > n_k \geq 1} \frac{1}{n_1^{s_1} n_2^{s_2} \cdots n_k^{s_k}}, \qquad s_1 \geq 2,\ s_i \geq 1$$
+
+Convergence requires $s_1 \geq 2$; the pole at $s_1 = 1$ is the **Fischer obstruction** that the `ImaginaryPopperActor` handles.
+
+Hidekazu Furusho's programme establishes that MZVs are governed by two independent multiplicative structures that agree on all actual $\zeta$-values:
+
+| Product | Definition | Origin |
+|---|---|---|
+| Shuffle $\shuffle$ | Interleave index sequences preserving relative order | Iterated Chen integral |
+| Stuffle (quasi-shuffle) $*$ | Shuffle + allowed merges $n_i = n_j$ with addition | Series representation |
+| Double shuffle | $f \shuffle g = f * g$ on $\zeta$-values | Furusho (2011); core identity |
+
+Both products are **weight-homogeneous**: the total weight $|\mathbf{s}| = s_1 + \cdots + s_k$ is additive and preserved.
+
+Furusho's **pentagon equation** governs MZV coherence via the Drinfeld KZ associator
+$\Phi_{\rm KZ}(A,B) \in \mathbb{C}\langle\!\langle A, B \rangle\!\rangle$:
+
+$$\Phi(t_{12},\, t_{23})\;\Phi(t_{02},\, t_{34})\;\Phi(t_{01},\, t_{13}) \;=\; \Phi(t_{23},\, t_{34})\;\Phi(t_{01},\, t_{24}) \qquad \text{(pentagon)}$$
+
+$$e^{B\pi i}\,\Phi(A,B)\,e^{A\pi i} \;=\; e^{-A\pi i}\,\Phi(A,B)^{-1}\,e^{-B\pi i} \qquad \text{(hexagon)}$$
+
+These determine the double shuffle Lie algebra $\mathfrak{ds}$ and, via the **5-cycle argument**, the $\mathbb{Z}/5\mathbb{Z}$ symmetry among MZV depth relations — the direct algebraic ancestor of the Petersen graph used here.
+
+#### IKZ Regularization (Ihara–Kaneko–Zagier)
+
+For **divergent** MZVs ($s_1 = 1$), the IKZ regularization defines a formal weight-preserving lift. Introducing the generating series:
+
+$$Z^{\shuffle}(T) = \exp\!\left(\sum_{k \geq 2} \frac{(-1)^k \zeta(k)}{k}\, T^k\right)$$
+
+the regularized value satisfies:
+
+$$\zeta^{\rm reg}(1, s_2, \ldots, s_k) = [T^0]\bigl(Z^{\shuffle}(T)^{-1} \cdot \widetilde{Z}(T,\, s_2, \ldots, s_k)\bigr)$$
+
+**Weight is preserved**: if $w = 1 + s_2 + \cdots + s_k$, then $\zeta^{\rm reg}$ has the same weight $w$.
+
+In the code, `ImaginaryPopperActor` implements the minimal convergent lift:
+
+$$s_1 = 1 \;\Longrightarrow\; (1,\, s_2,\, s_3) \;\longmapsto\; (2,\, s_2 - 1,\, s_3), \qquad w = 1 + s_2 + s_3 \text{ preserved}$$
+
+### Correspondence: Furusho ↔ `petersen-mzv`
+
+| Furusho / Standard MZV | `petersen-mzv` Code |
+|---|---|
+| $\zeta(s_1, s_2, s_3)$, depth-3 MZV | `MZVTriple(s1, s2, s3)` |
+| Convergence: $s_1 \geq 2$ | `isConvergent: Boolean = s1 > 1` |
+| Weight: $w = s_1 + s_2 + s_3$ | `mzvWeight: Int = s1 + s2 + s3` |
+| Even-depth sector, real part | `Outer(phase)`, phase $\in \mathbb{Z}/5\mathbb{Z}$ |
+| Odd-depth sector, Fischer obstruction | `Inner(phase)`, phase $\in \mathbb{Z}/5\mathbb{Z}$ |
+| Pentagon coherence step | `applyPentagonRelation(triple, src, tgt)` |
+| Shuffle step $\delta = -1$ (same sector) | `Inner↔Inner` or `Outer↔Outer` edge |
+| Stuffle step $\delta = +1$ (sector crossing) | `Outer↔Inner` spoke edge |
+| Diameter-2 bound (graph structure) | P1 (UNSAT): Petersen diameter $\leq 2$ |
+| Weight invariance under shuffle/stuffle | P2 (UNSAT): $s_2 + s_3$ conserved $\Rightarrow w$ invariant |
+| Divergent pole $s_1 = 1$ | `DivergentPoleException` — the `[IMAGINARY ???]` |
+| IKZ regularization (weight-preserving lift) | `ImaginaryPopperActor`: $s_1 \to 2,\ s_2 \to s_2 - 1$ |
+| Fixed-point / IKZ remainder = 0 (even weight) | P4 (SAT): `MZVTriple(3,2,1)` fixed on path `0→5→8` |
+| Convergence preserved under reduction | P6 (UNSAT): $s_1 > 1$ invariant across any 2-hop path |
+| Furusho's 5-cycle symmetry | $\mathbb{Z}/5\mathbb{Z}$ phase group of Petersen vertices |
+| p-adic MZV (p-adic KZ equation) | `BSDVertex.Padic`, Dieudonné prime $p$ |
+
+### Petersen Graph as $\mathbb{Z}/5\mathbb{Z}$ Phase Space
+
+The pentagon relation acts one step at a time across the edges of the Petersen graph. The 10 vertices encode a $\mathbb{Z}/5\mathbb{Z}$ phase group across two parity sectors:
+
+| SMT Integer | Scala Type | MZV Sector | Phase |
+|---|---|---|---|
+| $0,1,2,3,4$ | `Outer(i)` | Even-depth (real) | $i \in \mathbb{Z}/5\mathbb{Z}$ |
+| $5,6,7,8,9$ | `Inner(i)` | Odd-depth (imaginary / Fischer) | $i \in \mathbb{Z}/5\mathbb{Z}$ |
+
+The 15 undirected edges (30 directed arcs) split into three structurally distinct families:
+
+| Family | Vertex Pair | Count | $\delta$ | MZV Role |
+|---|---|---|---|---|
+| Outer 5-cycle | $\{i,\; (i+1)\%5\}$ | 5 | $-1$ | Even-sector phase rotation (shuffle) |
+| Spokes | $\{i,\; i+5\}$ | 5 | $+1$ | Real ↔ Imaginary crossing (stuffle merge) |
+| Inner star $\{5/2\}$ | $\{i+5,\; ((i+2)\%5)+5\}$ | 5 | $-1$ | Odd-sector phase rotation (shuffle) |
+
+The pentagon step transforms the triple according to:
+
+$$\delta(e) = \begin{cases} +1 & \text{if edge } e \text{ crosses sectors (Outer} \leftrightarrow \text{Inner)} \\ -1 & \text{otherwise (same sector)} \end{cases}$$
+
+$$(s_1,\, s_2,\, s_3) \;\xrightarrow{e}\; (s_1,\; s_2 + \delta(e),\; s_3 - \delta(e))$$
+
+Since $s_1$ is **never modified**, and $\delta$ is added to $s_2$ and subtracted from $s_3$, we have $s_2 + s_3 = \text{const}$, hence $w = s_1 + s_2 + s_3$ is invariant — proven by P2/UNSAT.
+
+**Example traversal** — test case `MZVTriple(3,2,1)` on path `Outer(0) → Inner(0) → Inner(3)`:
+
+| Step | Edge | Sector jump? | $\delta$ | $(s_1, s_2, s_3)$ | $w$ |
+|---|---|---|---|---|---|
+| Initial | — | — | — | $(3, 2, 1)$ | $6$ |
+| $0 \to 5$ | Spoke | Outer→Inner | $+1$ | $(3, 3, 0)$ | $6$ |
+| $5 \to 8$ | Inner star | Inner→Inner | $-1$ | $(3, 2, 1)$ | $6$ |
+
+The triple returns to its initial value: **fixed point** (P4/SAT). The IKZ regularization remainder is zero for this even-weight path — no odd-depth obstruction occurs.
+
+### SMT-Verified Properties (P1–P7)
+
+The verification suite in `mzv_petersen.smt2` / `PetersenSMTLib` encodes seven formal properties over `QF_LIA`:
+
+| Property | Expected | Statement | Mathematical Meaning |
+|---|---|---|---|
+| P1 | **UNSAT** | Petersen diameter $\leq 2$ | The `[TOPOLOGY ???]` is dead code; any two phases connect in $\leq 2$ steps |
+| P2 | **UNSAT** | $s_2 + s_3$ conserved per edge | Weight invariance: $w = s_1 + s_2 + s_3$ invariant under pentagon reduction |
+| P3 | **SAT** | Edges $\{0,5\}$ and $\{5,8\}$ exist | Path `Outer(0)→Inner(0)→Inner(3)` is valid in the graph |
+| P4 | **SAT**, model $(3,2,1)$ | `MZVTriple(3,2,1)` is a fixed point on `0→5→8` | IKZ remainder $= 0$; even weight 6 has no odd-depth obstruction |
+| P5 | **UNSAT** | $s_1 = 1 \wedge s_1 > 1$ contradictory | `[IMAGINARY ???]` fires exactly at the convergence boundary |
+| P6 | **UNSAT** | $s_1 > 1$ invariant across any 2-hop path | No traversal can make a convergent triple divergent |
+| P7 | **SAT**, model $\text{mid}=5$ | Unique midpoint `0→?→8` | `Inner(0)` is the unique mediating phase for `Outer(0)→Inner(3)` |
+
+### Two `???` Sites: Real vs. Imaginary
+
+The machine contains exactly two structurally distinct `???` sites, each with its own SMT certificate:
+
+| Site label | Exception type | SMT cert | Status | Actor |
+|---|---|---|---|---|
+| `[TOPOLOGY ???]` | `TopologyException` | P1 (UNSAT) | Dead code — graph diameter guarantee | Unreachable |
+| `[IMAGINARY ???]` | `DivergentPoleException` | P5 (UNSAT) | Live — Fischer f9 / $s_1=1$ pole | `ImaginaryPopperActor` |
+
+---
 
 ## The idea
 
@@ -22,9 +163,22 @@ Build systems are directed graphs. So are Banach spaces with norm-compatible map
 - **Frobenius arrows** (`FVRole.Frobenius`) point in the *norm-increasing* direction: forward dependencies, compilation steps, things that must happen.
 - **Verschiebung arrows** (`FVRole.Verschiebung`) point in the *norm-decreasing* direction: backward dependencies, cache invalidation, things that propagate failure upstream.
 
-Each `BSDArrow` carries an `IO[Unit]` effect that only fires after an SMT solver confirms the norm constraints are satisfiable. The Dieudonné relation (`selmer.norm × affine.norm = p × leech.norm`) acts as a global coherence condition tying the four standard vertices together.
+Each `BSDArrow` carries an `IO[Unit]` effect that only fires after an SMT solver confirms the norm constraints are satisfiable. The **Dieudonné relation** acts as a global coherence condition tying the four standard vertices together:
+
+$$\mathrm{norm}(\Sigma_I) \cdot \mathrm{norm}\!\left(\sqrt{A_{11}^\vee}\right) = p \cdot \mathrm{norm}(\Lambda_{24})$$
+
+In code: `selmer.norm × affine.norm = p × leech.norm`. This mirrors the Frobenius–Verschiebung composition $F \circ V = p \cdot \mathrm{id}$ on p-divisible groups — the algebraic backbone of the BSD conjecture.
 
 The goal is to make ill-ordered builds *unrepresentable* rather than merely *ill-advised*.
+
+### BSD Quiver Vertices
+
+| Vertex | Symbol | Role |
+|---|---|---|
+| `Leech` | $\Lambda_{24}$ | Leech lattice; norm baseline |
+| `AffineDual` | $\sqrt{A_{11}^\vee}$ | Affine dual; Frobenius target |
+| `Padic` | $\mathcal{O}^p$ | p-adic completion; Hida eigenvalue ratio |
+| `Selmer` | $\Sigma_I$ | Selmer group; Verschiebung target |
 
 ### Phantom extension: complex Berkovich weights
 
@@ -52,18 +206,18 @@ Three core operations on `PhantomCarabiner` correspond directly to number-theore
 
 | Operation | Formula | Role |
 |---|---|---|
-| `complement` | `w ↦ 6 − conj(w)` | self-duality across critical midpoint |
-| `verschiebung` | `w ↦ w / 2` | Witt-vector operator V for p = 2 |
-| `thetaLink` | `w ↦ −w·i` | IUT Θ-link; −π/2 rotation; ℤ₄ holonomy |
+| `complement` | $w \mapsto 6 - \overline{w}$ | Self-duality across critical midpoint |
+| `verschiebung` | $w \mapsto w / 2$ | Witt-vector operator $V$ for $p = 2$ |
+| `thetaLink` | $w \mapsto -w \cdot i$ | IUT $\Theta$-link; $-\pi/2$ rotation; $\mathbb{Z}_4$ holonomy |
 
 Two gauge-invariant observables are exposed as read-only projections:
 
-```scala
-def berryPhaseAngle: Double   // arg(weight) ∈ (−π, π]; Berry connection holonomy
-def weightNormSq: Double      // |weight|²; preserved by thetaLink, halved by verschiebung²
-```
+| Observable | Formula | Property |
+|---|---|---|
+| `berryPhaseAngle` | $\arg(w) \in (-\pi, \pi]$ | Advances by $-\pi/2$ per `thetaLink`; unchanged by `verschiebung` |
+| `weightNormSq` | $\lvert w \rvert^2 = \mathrm{re}^2 + \mathrm{im}^2$ | Preserved by `thetaLink`; halved by `verschiebung²` |
 
-`berryPhaseAngle` advances by exactly −π/2 under each `thetaLink` application and is
+`berryPhaseAngle` advances by exactly $-\pi/2$ under each `thetaLink` application and is
 unchanged by `verschiebung` (for `weight ≠ 0`), making it a natural invariant for
 tracking accumulated phase around a quiver path.
 
@@ -80,16 +234,20 @@ opaque type PhantomCarabinerRef = Ref[IO, PhantomCarabiner]
 `golayRoute` is the unique self-dual ascending path through all five Golay weight classes.
 Its structure encodes several simultaneous symmetries:
 
-```
-[W0, W8, W12, W16, W24]   orbit sizes: [1, 759, 2576, 759, 1]
-SpaceTags: [Affine, Banach, Hybrid, Banach, Affine]   ← palindrome
-heights:   [0, 8/3, 4, 16/3, 8]                       ← fan equation h[i] + h[4−i] = 8
-totalPositions = 1 + 759 + 2576 + 759 + 1 = 4096 = 2¹²
-recessionFan(golayRoute) == golayRoute                 ← self-dual
-```
+| Step | Weight | Orbit Size | Berkovich Height $h$ | Space Tag | Complement $h' = 8 - h$ |
+|---|---|---|---|---|---|
+| 0 | W0 | 1 | $0$ | Affine | $8$ (W24) |
+| 1 | W8 | 759 | $8/3$ | Banach | $16/3$ (W16) |
+| 2 | W12 | 2576 | $4$ | Hybrid | $4$ (W12, self-dual) |
+| 3 | W16 | 759 | $16/3$ | Banach | $8/3$ (W8) |
+| 4 | W24 | 1 | $8$ | Affine | $0$ (W0) |
 
-The Mathieu group M₂₄ conjugacy class 8A has exactly 759 elements — matching
-`GolayWeight.W8.orbitSize` — which is how M₂₄ group theory enters the route structure.
+$$\text{totalPositions} = 1 + 759 + 2576 + 759 + 1 = 4096 = 2^{12}$$
+
+**Fan equation** (complement symmetry): $h[i] + h[4-i] = 8$ for all $i$.
+
+The Mathieu group $M_{24}$ conjugacy class 8A has exactly 759 elements — matching
+`GolayWeight.W8.orbitSize` — which is how $M_{24}$ group theory enters the route structure.
 
 ### Spectral bridge: Yang-Baxter and spiral rotations
 
@@ -102,24 +260,30 @@ lattice to the continuous Berkovich tree:
 PhantomCarabiner.fromSpiralRotation(s)   // weight = spectral parameter
 ```
 
-The spectral R-matrix `R(u)((i₁,i₂),(j₁,j₂)) = u·δᵢ₁ⱼ₁δᵢ₂ⱼ₂ + δᵢ₁ⱼ₂δᵢ₂ⱼ₁` gives
-the rational GL₂ Yang-Baxter operator at spectral parameter u.
+The spectral R-matrix $R(u)$ gives the rational $GL_2$ Yang-Baxter operator:
+
+$$R(u)\bigl((i_1, i_2),\,(j_1, j_2)\bigr) = u\,\delta_{i_1 j_1}\delta_{i_2 j_2} + \delta_{i_1 j_2}\delta_{i_2 j_1}$$
 
 ### Height functions: two scales, two purposes
 
 `MachineConstants` distinguishes two height functions that are frequently conflated:
 
-```
-galoisHeight(n) = 8 · log(n) / log(24)     ← logarithmic; GIT semistability mask
-octadHeight(w)  = w / 3                     ← linear;      Berkovich tree position
+| Function | Formula | Scale | Purpose |
+|---|---|---|---|
+| `galoisHeight(n)` | $8 \cdot \log(n) / \log(24)$ | Logarithmic | GIT semistability mask |
+| `octadHeight(w)` | $w / 3$ | Linear | Berkovich tree position |
 
-galoisHeight(8)  ≈ 5.23   (representation-theoretic weight)
-octadHeight(8)   = 8/3    (geometric position on the tree)
-```
+Concrete values:
+
+| Weight | `galoisHeight` | `octadHeight` |
+|---|---|---|
+| $n = 8$ | $\approx 5.23$ | $8/3$ |
+| $n = 12$ | $\approx 6.59$ | $4$ |
+| $n = 24$ | $8.00$ | $8$ |
 
 The logarithmic function encodes a **GIT stability condition**: orbits whose
-representation dimension grows faster than `log` are filtered out, exactly as unstable
-SIMT threads are predicated off in a warp.  `machineEpsilonReal = 2⁻⁵²` (IEEE 754)
+representation dimension grows faster than $\log$ are filtered out, exactly as unstable
+SIMT threads are predicated off in a warp. `machineEpsilonReal = 2^{-52}` (IEEE 754)
 and `valuationDepth = 52` (mantissa bits) ground the tower in hardware arithmetic.
 
 ### SIMD ↔ SIMT correspondence
@@ -153,38 +317,20 @@ enum BSDArrow[Src <: BSDVertex, Tgt <: BSDVertex](
 
 A `List[BSDArrow[? <: BSDVertex, ? <: BSDVertex]]` is therefore a *braid word*: a
 sequence of typed generators where each element knows its source and target strands.
-Evaluating such a list one element at a time is the JVM analogue of reading a braid
-word left-to-right and applying each generator.
-
 The difficulty is that `BSDArrow` carries no `unapply`, so constructor-style matching
-is rejected by the compiler:
-
-```scala
-// ILLEGAL — BSDArrow has no unapply; Src and Tgt are existential
-case BSDArrow(src, tgt, FVRole.Frobenius, _) => ...
-```
-
-The fix is a **braid pop**: instead of destructuring the whole constructor, pop only
+is rejected by the compiler. The fix is a **braid pop**: instead of destructuring the whole constructor, pop only
 the field you need and let the declared bound resolve the existential:
 
 ```scala
 // Pop .role — a concrete FVRole with no existential involved.
-// .src and .tgt carry bound ? <: BSDVertex, accepted where BSDVertex is expected.
 a.role match
   case FVRole.Frobenius    => ThresholdConstraint.FrobeniusGE(a.src, a.tgt)
   case FVRole.Verschiebung => ThresholdConstraint.VerschiebungLE(a.src, a.tgt)
-
-// Alternatively, pin the concrete case with a type-test (fully resolves the existential):
-case a: BSDArrow.TensorBang => ThresholdConstraint.FrobeniusGE(a.src, a.tgt)
-//  a.src: Leech.type <: BSDVertex  ✓  — no cast, no ascription needed
 ```
 
 The type-test form is used when exhaustiveness over the sealed enum is required (e.g.
 `BSDQuiverManager.executeArrow`); the `.role match` form is used when the role
 partition is the semantically meaningful one (e.g. `ThresholdProblem.fromArrows`).
-`berryPhaseAngle` on `PhantomCarabiner` plays the same role at runtime: it is the
-only observable that survives orbit-averaging and erases the phantom type parameters,
-just as `.role` is the only field that matters for the threshold encoding.
 
 ### Dhall as an interactive input interface
 
@@ -217,6 +363,13 @@ CondExpr = Compare(threshold, op)   -- COND=(4,LT): skip if 4 < prevRC
          | Only                     -- COND=ONLY:   execute only after ABEND
 ```
 
+| `CondExpr` | JCL Equivalent | Semantics |
+|---|---|---|
+| `Compare(t, LT)` | `COND=(t,LT)` | Skip if `t < maxPrevRC` |
+| `Compare(t, NE)` | `COND=(t,NE)` | Skip if `t ≠ maxPrevRC` |
+| `Even` | `COND=EVEN` | Always execute (never skip) |
+| `Only` | `COND=ONLY` | Execute only if a prior step ABENDed |
+
 This ADT is declared in `BatchJob.dhall` and decoded into Scala via circe.
 Invalid execution orders — such as a recovery step marked `Only` running when no step has ABENDed — are caught by `CondEvaluator` before the step actor ever starts.
 
@@ -226,11 +379,15 @@ Invalid execution orders — such as a recovery step marked `Only` running when 
 When a step throws `StepAbended`, only that actor is stopped; all sibling steps continue unaffected.
 This design takes inspiration from z/OS JES2-style step-level fault isolation, where an individual step ABEND does not cascade into a full job failure unless the subsequent COND logic dictates it.
 
+---
+
 ## Why two solvers?
 
 Z3 and Yices 2 run as independent verification lanes over the same canonical `ThresholdProblem` AST. Agreement is a stronger signal than a single SAT verdict; each solver produces a *proof artifact* that can be checked independently — useful once the project gains SPARK/Ada packages that need external witnesses.
 
 The two bridges are deliberately kept at arm's length: `z3-bridge` links against the Z3 JNI library; `yices-bridge` shells out to `yices-smt2`. Neither knows the other exists.
+
+---
 
 ## Requirements
 
@@ -238,6 +395,7 @@ The two bridges are deliberately kept at arm's length: `z3-bridge` links against
 - sbt 1.x
 - `yices-smt2` on `$PATH` for Yices smoke tests and CI
 - `dhall-to-json` on `$PATH` for `dhall-bridge` and `batch-bridge` evaluation
+- `z3` on `$PATH` (or via `Z3_PATH`) for optional MZV SMT smoke tests (`RUN_MZV_SMT_SMOKE=1`)
 
 ## Build
 
@@ -261,6 +419,12 @@ For the full Yices integration smoke suite locally:
 
 ```bash
 RUN_YICES_SMOKE=1 sbt "yicesBridge/test"
+```
+
+For the MZV / Petersen SMT smoke suite (requires `z3`):
+
+```bash
+RUN_MZV_SMT_SMOKE=1 sbt "petersenMzv/test"
 ```
 
 ## Repository layout
@@ -287,10 +451,99 @@ modules/
       batch/          — BatchJobDef, DhallBatchRegistry, CondEvaluator
   batch-bridge/       — Spring Batch + Pekko JES2; StackMachineTasklet, StepExecutorActor, JobSupervisorActor
   mlir-bridge/        — planned MLIR / Affine Dialect integration
+examples/
+  petersen-mzv/
+    src/main/scala/io/siunertaq/mzv/
+      domain/         — MZVTypes.scala: Vertex, MZVTriple
+      machine/        — PetersenFluidMachine.scala, exception taxonomy
+      enterprise/     — ImaginaryPopperActor.scala, MZVMachineBean.scala, Spring @Configuration
+      smt/            — PetersenSMTLib.scala (typed SMT-LIB 2 AST), PetersenSmtSolver.scala
+    src/main/resources/
+      mzv_petersen.smt2  — Hand-written SMT-LIB 2 (P1–P7), runnable with z3 directly
+    src/test/scala/io/siunertaq/mzv/
+      PetersenSMTLibSpec.scala  — unit + smoke tests for the SMT generator
+  mzv_enterprise_carabiner_system.scala  — standalone demonstration
 .github/workflows/
   yices_test_ci.yml   — CI: installs Yices 2, runs threshold + solver + CondEvaluator tests
   release.yml         — Release: tag push → full test → sbt package → GitHub Release
 ```
+
+---
+
+## Release Notes
+
+### v0.1.0-alpha.2 — True Green Build
+
+This release focuses on solidifying the build pipeline, achieving full CI compliance (the "True Green" build), and resolving complex Scala 2 / Scala 3 interoperability bottlenecks within the `petersen-mzv` module.
+
+#### Scala 3 Compiler & Type Safety
+
+| Fix | Location | Detail |
+|---|---|---|
+| Strict equality bypasses | `PetersenFluidMachine` | Resolved `-language:strictEquality` errors in Scala 3.8. Replaced direct `==` on `Class[?]` / `Vertex` with explicit `.getClass.getName !=` and `.equals()` for dynamic graph traversal boundaries |
+| SMT-LIB AST interoperability | `PetersenSMTLib` | Fixed Scala 2/3 type mismatch: `QF_LIA` case object failed to upcast to `Logic` trait. Applied explicit `.asInstanceOf[Logic]` cast |
+| Domain model accessors | `MZVMachineBean` | Updated getter references (`getS1` → `s1`, etc.) to align with Scala 3 property accessors, ensuring interoperability with Spring EL and Java-based enterprise components |
+
+#### Build Pipeline & Dependency Management
+
+| Fix | Detail |
+|---|---|
+| `scala-smtlib` version resolution | Fixed a critical artifact duplication error (`_2.13_2.13`) that broke CI. Pinned to upstream staging commit `0.2.1-42-gc68dbaa` with correct `cross CrossVersion.for3Use2_13` semantics |
+| Spring Framework integration | Injected missing `spring-context` (`6.1.14`) into the `petersen-mzv` build definition, restoring `@Service` and `@Autowired` bean wiring for the JVM MZV execution engine |
+
+> **Note:** With these changes, the entire ecosystem — including the `postgres-bridge`, MZV boundary evaluations, and SMT verifications — now successfully compiles and passes automated CI testing without silent omissions.
+
+---
+
+### v0.1.0-alpha.1 — `postgres-bridge` and MZV/BSD Quiver Bridge
+
+This alpha release introduces the `postgres-bridge` module, expanding the Siunertaq ecosystem to support database-backed auditing and a pure-SQL Forth compilation engine. The core architectural addition is the mapping of the Petersen graph (MZV vertices) onto the BSD quiver, bridging JVM bytecode execution with JCL-inspired Spring Batch steps.
+
+#### PostgreSQL Bridge (`postgres-bridge`)
+
+| Feature | Description |
+|---|---|
+| `siunertaq_forth` | Pure-SQL BSD Quiver Forth compilation engine targeting JVM/Spring Batch step programs |
+| `siunertaq_petersen` | Maps Petersen graph vertices (`Outer`/`Inner`) to MZV parts (`Real`/`Imaginary`) and bounds them to BSD quiver vertices (`Leech`, `AffineDual`, `Padic`, `Selmer`) |
+| `mzv_triple_log` | Audit log tracking divergent triples and regularization states (`register_imaginary_pop`) — all imaginary phase shifts immutably recorded |
+
+**Petersen → BSD quiver vertex mapping:**
+
+| Petersen Vertex | MZV Part | BSD Quiver Vertex |
+|---|---|---|
+| `Outer(i)` (even-depth) | Real | `Leech` / `AffineDual` |
+| `Inner(0)` (odd-depth, pole) | Imaginary (ABEND boundary) | `Selmer` |
+| `Inner(i≥1)` (odd-depth, recovery) | Imaginary (recovery path) | `Padic` |
+
+#### Type-Safe Connection State & Supervision
+
+| Component | Description |
+|---|---|
+| `ForthConnMachine` | `cats.effect.Ref`-backed state machine (`Idle`, `Busy`, `Closed`) for JDBC connections. Guarantees connection safety under SQL exceptions; exposes a gauge-invariant `phase` diagnostic view |
+| `ForthRegistrarActor` | Integrates the database layer into the Pekko supervision tree. Employs JES2-inspired fault isolation via `OneForOneStrategy`, recovering from `SQLException` and `IOException` without cascading failures |
+
+#### Stack Machine & Bytecode Compilation
+
+| Component | Description |
+|---|---|
+| `ClassASTBridge` | Safely extracts arithmetic opcodes (`BIPUSH`, `IADD`, `IMUL`) directly from compiled `.class` bytecode via ASM, translating them into Dhall-compatible `StackInstr` JSON arrays. Guarantees isomorphism between "executed JVM code" and "recorded Forth code" |
+
+#### Dhall & Scala Symmetry
+
+`PetersenMZV.dhall` and `PetersenVertexBSD.scala` establish a guaranteed bidirectional mapping:
+
+| Petersen Vertex | Dhall/Scala `cond` | JCL Analog |
+|---|---|---|
+| `Outer(i)` (even-depth, Real) | `None` / standard execution | Normal step |
+| `Inner(0)` (odd-depth, pole) | `COND=ONLY` (ABEND recovery boundary) | Recovery step |
+| `Inner(i≥1)` (odd-depth, recovery) | `COND=(0,NE)` | Conditional recovery |
+
+#### Dependencies Bumped
+
+- `org.postgresql` → `42.7.3`
+- Introduced `doobie-core` and `skunk-core` (`1.0.0-RC2`) for future pure-functional DB integrations.
+
+---
 
 ## Current status
 
@@ -301,6 +554,7 @@ modules/
 - `batch-bridge` implemented: `BatchJob.dhall` → `BatchJobDef` → Spring Batch step execution driven by the BSD Quiver stack machine, with JCL-inspired `CondExpr` execution control and Pekko `OneForOneStrategy` fault isolation.
 - `CondEvaluatorSpec` covers all six `CondOp` variants with boundary values; runs in CI without any external tools.
 - Automated release workflow publishes per-module JARs to GitHub Releases on version tag push.
+- `petersen-mzv` module: `PetersenFluidMachine` implements Furusho's pentagon coherence as a typed Scala 3 Cats Effect pipeline; `ImaginaryPopperActor` handles IKZ-style regularization of divergent triples ($s_1 = 1$); full SMT suite P1–P7 passes on `z3`.
 - `carabiner/` package formalises the Golay lattice (five weight classes, self-dual route,
   M₂₄ 8A orbit match) and lifts it to a complex Berkovich evaluation layer via `PhantomCarabiner`.
 - `opaque type ComplexWeight` and `opaque type PhantomCarabinerRef` hide implementation details
@@ -311,9 +565,7 @@ modules/
   `machineEpsilonReal = 2⁻⁵²` and `valuationDepth = 52`.
 - `YangBaxterBanach` supplies the Satake spectral parameter bridge (`SpiralRotation →
   spiralToSpectralParam → PhantomCarabiner`) and the rational GL₂ R-matrix.
-- Type-safe braid pop pattern documented and applied consistently: `List[BSDArrow[? <: BSDVertex,
-  ? <: BSDVertex]]` with `.role match` or type-test resolves existential type parameters without
-  casts; `BSDArrow` companion object provides lowercase smart constructors for test code.
+- v0.1.0-alpha.2: full CI compliance achieved; Scala 2/3 interoperability bottlenecks in `petersen-mzv` resolved.
 
 ## Future work
 
@@ -329,12 +581,13 @@ modules/
 - `YangBaxterBanach.yang_baxter_eq` is similarly `sorry`; connecting it to the spectral R-matrix
   via the automorphic L-function trace (§9 of the Lean spec) is the next algebraic milestone
 - Replace the `galoisHeight` mock in `BSDQuiver.scala` (`tau.toDouble`) with `MachineConstants.galoisHeight`
-  once the DP accumulation semantics are settled; currently kept separate to avoid changing
-  the DP weight scale without an accompanying test update
+  once the DP accumulation semantics are settled
 - `CarabinerCodeword` and `GoppaInterface` stubs in `Carabiner.scala` require Steiner S(5,8,24)
   orbit-boundary data to complete
 - `golayWeightToBraid` bridge between `GolayWeight` and `BraidWord` (sketched in `YangBaxterBanach.lean`)
   needs a concrete Ariki-Koike specialisation at `n=8, r=3`
+- Full Furusho double shuffle verification: encode the shuffle/stuffle equivalence as an SMT property over `QF_LIA` and verify it holds for depth-3 MZVs across all 10 Petersen vertices
+- `postgres-bridge` completion: wire `mzv_triple_log` audit table into the Pekko supervision tree so every `ImaginaryPopperActor` regularization event is immutably recorded in PostgreSQL
 
 ## Contributing
 
