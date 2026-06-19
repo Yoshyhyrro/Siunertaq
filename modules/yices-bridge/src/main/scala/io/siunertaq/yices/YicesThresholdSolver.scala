@@ -2,7 +2,7 @@ package io.siunertaq.yices
 
 import java.nio.charset.StandardCharsets
 
-import io.siunertaq.BSDArrow
+import io.siunertaq.{ BSDArrow, BSDVertex }
 import io.siunertaq.threshold.{ ThresholdConstraint, ThresholdNames, ThresholdProblem }
 
 enum YicesStatus derives CanEqual:
@@ -42,7 +42,7 @@ object YicesThresholdSolver:
   private def yicesBin: String =
     sys.env.getOrElse("YICES_SMT2", "yices-smt2")
 
-  def verify(arrows: List[BSDArrow], prime: Int = 7): Either[String, String] =
+  def verify(arrows: List[BSDArrow[? <: BSDVertex, ? <: BSDVertex]], prime: Int = 7): Either[String, String] =
     verify(ThresholdProblem.fromArrows(arrows, prime))
 
   def verify(problem: ThresholdProblem): Either[String, String] =
@@ -55,7 +55,7 @@ object YicesThresholdSolver:
         case YicesStatus.Unsat =>
           Left("UNSAT: Yices 2 determined the norm constraints are unsatisfiable")
         case YicesStatus.Unknown =>
-          Left(s"UNKNOWN: Yices 2 が結論を出せませんでした\n${checkResult.stdout}\n${checkResult.stderr}".trim)
+          Left(s"UNKNOWN: Yices 2 could not reach a conclusion\n${checkResult.stdout}\n${checkResult.stderr}".trim)
       }
     }
 

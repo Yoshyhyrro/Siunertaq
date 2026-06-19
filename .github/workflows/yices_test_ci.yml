@@ -3,6 +3,8 @@ name: Yices Threshold CI
 on:
   workflow_dispatch:
   push:
+    branches:
+      - example/feature/jvm-mzv_postgres-bridge
     paths:
       - build.sbt
       - modules/core/**
@@ -10,6 +12,8 @@ on:
       - modules/dhall-bridge/**          # CondEvaluatorSpec がここに入る
       - modules/batch-bridge/build.sbt
       - modules/yices-bridge/**
+      - examples/**               # examples の変更もテストに影響する可能性があるため
+      - modules/postgres-bridge/**  # postgres-bridge の変更もテストに影響する可能性があるため
       - .github/workflows/yices_test_ci.yml
   pull_request:
     paths:
@@ -19,11 +23,12 @@ on:
       - modules/dhall-bridge/**
       - modules/batch-bridge/build.sbt
       - modules/yices-bridge/**
+      - examples/**                      # examples の変更もテストに影響する可能性があるため
+      - modules/postgres-bridge/**       # postgres-bridge の変更もテストに影響する可能性があるため
       - .github/workflows/yices_test_ci.yml
 
 permissions:
   contents: read
-
 concurrency:
   group: yices-threshold-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -80,6 +85,8 @@ jobs:
             "z3Bridge/compile"                       \
             "yicesBridge/compile"                    \
             "batchBridge/compile"                    \
+            "postgresBridge/compile"                 \
+            "petersenMzv/compile"                    \
             "yicesBridge/testOnly io.siunertaq.yicesbridge.*"
 
       - name: Upload Yices artifacts on failure

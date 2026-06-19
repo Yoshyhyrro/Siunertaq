@@ -25,3 +25,6 @@ Thumbs.db
 # Logs and temporary files
 /logs/
 *.log
+
+#another
+check.bash

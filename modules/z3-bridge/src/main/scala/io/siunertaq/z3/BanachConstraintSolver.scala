@@ -24,21 +24,21 @@ import io.siunertaq.threshold.{ ThresholdConstraint, ThresholdNames, ThresholdPr
   */
 object BanachConstraintSolver:
 
-  /** Z3 Context は重いので使い捨てにする (スレッドセーフでないため) */
+  /** Z3 Context is heavy, so it should be used as a disposable resource (not thread-safe) */
   def verify(
-    arrows: List[BSDArrow],
+    arrows: List[BSDArrow[? <: BSDVertex, ? <: BSDVertex]],
     prime:  Int = 7
   ): Either[String, String] =
     verify(ThresholdProblem.fromArrows(arrows, prime))
 
-  /** canonical threshold AST を Z3 で検証する。 */
+  /** Verify a canonical threshold AST using Z3. */
   def verify(problem: ThresholdProblem): Either[String, String] =
-    // try-with-resources 相当: Context は AutoCloseable
+    // try-with-resources equivalent: Context is AutoCloseable
     val ctx    = Context()
     val solver = ctx.mkSolver()
 
     try
-      // 頂点ごとのノルム変数
+      // Norm variables for each vertex: norm(Leech), norm(AffineDual), norm(Padic), norm(Selmer)
       val normVars: Map[BSDVertex, RealExpr] =
         BSDVertex.values.map { v =>
           v -> ctx.mkRealConst(ThresholdNames.normVar(v))

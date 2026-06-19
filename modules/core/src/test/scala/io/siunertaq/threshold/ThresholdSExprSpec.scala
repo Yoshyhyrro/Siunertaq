@@ -5,6 +5,8 @@ import io.siunertaq.BSDArrow
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
+// Placement: modules/core/src/test/scala/io/siunertaq/threshold/ThresholdSExprSpec.scala
+
 class ThresholdSExprSpec extends AnyFunSpec with Matchers:
 
   import io.siunertaq.BSDVertex
@@ -16,10 +18,11 @@ class ThresholdSExprSpec extends AnyFunSpec with Matchers:
         prime = 11
       )
 
-      problem.constraints should contain (ThresholdConstraint.NonNegative(io.siunertaq.BSDVertex.Leech))
-      problem.constraints should contain (ThresholdConstraint.FrobeniusGE(io.siunertaq.BSDVertex.Leech, io.siunertaq.BSDVertex.AffineDual))
-      problem.constraints should contain (ThresholdConstraint.VerschiebungLE(io.siunertaq.BSDVertex.Leech, io.siunertaq.BSDVertex.Selmer))
-      problem.constraints should contain (ThresholdConstraint.DieudonneEq(io.siunertaq.BSDVertex.Selmer, io.siunertaq.BSDVertex.AffineDual, 11, io.siunertaq.BSDVertex.Leech))
+      // Dotted method syntax: avoids Scala 3.8 alphanumeric-infix warning
+      problem.constraints.should(contain(ThresholdConstraint.NonNegative(BSDVertex.Leech)))
+      problem.constraints.should(contain(ThresholdConstraint.FrobeniusGE(BSDVertex.Leech, BSDVertex.AffineDual)))
+      problem.constraints.should(contain(ThresholdConstraint.VerschiebungLE(BSDVertex.Leech, BSDVertex.Selmer)))
+      problem.constraints.should(contain(ThresholdConstraint.DieudonneEq(BSDVertex.Selmer, BSDVertex.AffineDual, 11, BSDVertex.Leech)))
     }
   }
 
@@ -37,7 +40,8 @@ class ThresholdSExprSpec extends AnyFunSpec with Matchers:
         ).constraints :+ ThresholdConstraint.EqualsConstant(BSDVertex.Padic, 8)
       )
 
-      ThresholdSExprCodec.fromSExpr(ThresholdSExprCodec.toSExpr(problem)) shouldBe Right(problem)
+      ThresholdSExprCodec.fromSExpr(ThresholdSExprCodec.toSExpr(problem))
+        .shouldBe(Right(problem))
     }
   }
 
@@ -48,8 +52,9 @@ class ThresholdSExprSpec extends AnyFunSpec with Matchers:
           ThresholdConstraint.EqualsConstant(BSDVertex.Padic, 8)
       )
 
-      ThresholdSExprCodec.prettyPrint(ThresholdSExprCodec.toSExpr(problem)) should include ("FrobeniusGE")
-      ThresholdSExprCodec.prettyPrint(ThresholdSExprCodec.toSExpr(problem)) should include ("DieudonneEq")
-      ThresholdSExprCodec.prettyPrint(ThresholdSExprCodec.toSExpr(problem)) should include ("EqualsConstant")
+      val rendered = ThresholdSExprCodec.prettyPrint(ThresholdSExprCodec.toSExpr(problem))
+      rendered.should(include("FrobeniusGE"))
+      rendered.should(include("DieudonneEq"))
+      rendered.should(include("EqualsConstant"))
     }
   }
