@@ -588,12 +588,3 @@ This alpha release introduces the `postgres-bridge` module, expanding the Siuner
   needs a concrete Ariki-Koike specialisation at `n=8, r=3`
 - Full Furusho double shuffle verification: encode the shuffle/stuffle equivalence as an SMT property over `QF_LIA` and verify it holds for depth-3 MZVs across all 10 Petersen vertices
 - `postgres-bridge` completion: wire `mzv_triple_log` audit table into the Pekko supervision tree so every `ImaginaryPopperActor` regularization event is immutably recorded in PostgreSQL
-
-## Contributing
-
-1. Open an issue before larger design changes.
-2. Branch off `example/jvm-mzv` or the relevant feature branch.
-3. Keep changes focused; prefer lawful additions over convenient ones.
-4. `sbt test` must be green before opening a PR.
-
-Contributions that improve proof coverage, solver reliability, or documentation are especially welcome.
