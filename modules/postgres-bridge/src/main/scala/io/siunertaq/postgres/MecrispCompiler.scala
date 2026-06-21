@@ -32,7 +32,9 @@ object MecrispCompiler:
 
   // ─── §1  Single opcode → Mecrisp instruction(s) ──────────────────────────
 
-  sealed trait OpcodeResult
+  // derives CanEqual: required under -language:strictEquality when Skip (case object)
+  // is matched in a PartialFunction or flatMap over OpcodeResult
+  sealed trait OpcodeResult derives CanEqual
   case class Single(instr: MecrispInstr)         extends OpcodeResult
   case class Multi(instrs: List[MecrispInstr])   extends OpcodeResult
   case class Stub(comment: String)               extends OpcodeResult
@@ -103,20 +105,18 @@ object MecrispCompiler:
       case SWAP                    => Single(Swap)
 
       // ── Local variables ───────────────────────────────────────────────────
+      //
+      //  ASM's ClassReader normalises ISTORE_0..3 / ILOAD_0..3 (JVM spec opcodes
+      //  59-62 / 26-29) to visitVarInsn(ISTORE/ILOAD, varIndex) before dispatching.
+      //  The _N suffix variants are NOT constants in org.objectweb.asm.Opcodes —
+      //  matching them here would be a compile error; the ISTORE/ILOAD branches
+      //  below cover all slots via the varIndex operand.
       case ISTORE | LSTORE =>
         val slot = operandInt.getOrElse(0)
         Multi(List(VariableRef(s"var_$slot"), Store))
-      case ISTORE_0                => Multi(List(VariableRef("var_0"), Store))
-      case ISTORE_1                => Multi(List(VariableRef("var_1"), Store))
-      case ISTORE_2                => Multi(List(VariableRef("var_2"), Store))
-      case ISTORE_3                => Multi(List(VariableRef("var_3"), Store))
       case ILOAD | LLOAD =>
         val slot = operandInt.getOrElse(0)
         Multi(List(VariableRef(s"var_$slot"), Fetch))
-      case ILOAD_0                 => Multi(List(VariableRef("var_0"), Fetch))
-      case ILOAD_1                 => Multi(List(VariableRef("var_1"), Fetch))
-      case ILOAD_2                 => Multi(List(VariableRef("var_2"), Fetch))
-      case ILOAD_3                 => Multi(List(VariableRef("var_3"), Fetch))
 
       // ── Array memory (simplified: treat as flat cell array) ───────────────
       case IALOAD | LALOAD         => Single(Fetch)
@@ -369,10 +369,10 @@ object MecrispCompiler:
     ISHL -> "ISHL", ISHR -> "ISHR", IUSHR -> "IUSHR",
     DUP -> "DUP", DUP_X1 -> "DUP_X1", DUP2 -> "DUP2",
     POP -> "POP", POP2 -> "POP2", SWAP -> "SWAP",
-    ISTORE -> "ISTORE", ISTORE_0 -> "ISTORE_0", ISTORE_1 -> "ISTORE_1",
-    ISTORE_2 -> "ISTORE_2", ISTORE_3 -> "ISTORE_3",
-    ILOAD -> "ILOAD", ILOAD_0 -> "ILOAD_0", ILOAD_1 -> "ILOAD_1",
-    ILOAD_2 -> "ILOAD_2", ILOAD_3 -> "ILOAD_3",
+    // Note: ISTORE_0..3 / ILOAD_0..3 are not Opcodes constants in ASM 9.x —
+    // ASM normalises them to ISTORE/ILOAD with the variable index operand.
+    ISTORE -> "ISTORE",
+    ILOAD  -> "ILOAD",
     IFEQ -> "IFEQ", IFNE -> "IFNE", IFLT -> "IFLT",
     IFGE -> "IFGE", IFGT -> "IFGT", IFLE -> "IFLE",
     IF_ICMPEQ -> "IF_ICMPEQ", IF_ICMPNE -> "IF_ICMPNE",
