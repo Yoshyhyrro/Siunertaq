@@ -43,12 +43,33 @@ import scala.concurrent.duration.*
 //    Body: one JSON object per line (JSONEachRow)
 
 // ── Protocol ────────────────────────────────────────────────────────────────
+//
+//  All messages extend Msg which derives CanEqual.
+//  This is required under -language:strictEquality when Pekko classic actors
+//  use `receive: PartialFunction[Any, Unit]` — without CanEqual, matching
+//  case objects against Any causes [E172] at compile time.
+//
+//  CompilationResult is defined here (not referencing ClassASTBridge.CompilationResult)
+//  so this file compiles independently of the ClassASTBridge v2 upgrade.
 
 object ClickHouseSyncProtocol:
-  /** Push compiled words and bytecode rows from a ClassASTBridge result. */
-  final case class PushCompilation(result: ClassASTBridge.CompilationResult)
 
-  /** Push a single MZV traversal event (from ImaginaryPopperActor or PetersenFluidMachine). */
+  /** Payload from ClassASTBridge.compileClass() — defined inline to avoid
+   *  depending on ClassASTBridge v2 (which may not yet be in the repo). */
+  final case class CompilationPayload(
+    words:    Vector[MecrispWordDef],
+    rows:     Vector[MecrispCompiler.BytecodeRow],
+    fileHash: String
+  )
+
+  // sealed Msg: all protocol messages in one hierarchy
+  // derives CanEqual: required for -language:strictEquality + Pekko classic receive
+  sealed trait Msg derives CanEqual
+
+  /** Push compiled words and bytecode rows to ClickHouse. */
+  final case class PushCompilation(payload: CompilationPayload) extends Msg
+
+  /** Push a single MZV traversal event. */
   final case class PushMZVTriple(
     s1: Int, s2: Int, s3: Int,
     isConvergent:   Boolean,
@@ -59,16 +80,19 @@ object ClickHouseSyncProtocol:
     wasRegularized: Boolean,
     originalS1:     Option[Int],
     compiledStep:   Option[String]
-  )
+  ) extends Msg
 
-  /** Flush all buffered rows immediately (used in graceful shutdown). */
-  case object FlushNow
+  /** Flush all buffered rows immediately (graceful shutdown). */
+  case object FlushNow extends Msg
 
-  /** Internal timer tick (do not send externally). */
-  private[postgres] case object SyncTick
+  // Timer ticks: NOT private[postgres] — must be members of sealed Msg
+  // so exhaustiveness checking works and CanEqual derivation covers them.
+  case object SyncTick extends Msg
+  case object PollTick extends Msg
 
-  /** Internal poll tick for mzv_triple_log. */
-  private[postgres] case object PollTick
+  // CanEqual witness: allows Msg subtypes to appear in
+  // receive: PartialFunction[Any, Unit] without strictEquality errors
+  given CanEqual[Msg, Any] = CanEqual.derived
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -127,34 +151,41 @@ final class ClickHouseSyncActor(
       case _                      => SupervisorStrategy.Escalate
 
   // ── Message handling ───────────────────────────────────────────────────────
+  //
+  //  Two-level match pattern for -language:strictEquality + Pekko classic:
+  //    Outer: `case m: Msg` — isInstanceOf check, no CanEqual needed for Any
+  //    Inner: `m match { ... }` — fully typed, CanEqual derived on Msg covers all cases
+  //
+  //  Unrecognised messages (non-Msg) fall through to Pekko's `unhandled`.
   override def receive: Receive =
+    case m: Msg => m match
 
-    case PushCompilation(result) =>
-      bytecodeBuf ++= result.rows
-      wordBuf     ++= result.words
-      log.debug("[CH] buffered {} bytecode rows, {} words", result.rows.size, result.words.size)
-      if bytecodeBuf.size >= cfg.batchSize then flushAll()
+      case PushCompilation(payload) =>
+        bytecodeBuf ++= payload.rows
+        wordBuf     ++= payload.words
+        log.debug("[CH] buffered {} bytecode rows, {} words", payload.rows.size, payload.words.size)
+        if bytecodeBuf.size >= cfg.batchSize then flushAll()
 
-    case PushMZVTriple(s1, s2, s3, conv, srcS, srcP, tgtS, tgtP, wasReg, origS1, step) =>
-      val row = Json.obj(
-        "s1"             -> s1.asJson,
-        "s2"             -> s2.asJson,
-        "s3"             -> s3.asJson,
-        "is_convergent"  -> (if conv then 1 else 0).asJson,
-        "src_sector"     -> srcS.asJson,
-        "src_phase"      -> srcP.asJson,
-        "tgt_sector"     -> tgtS.asJson,
-        "tgt_phase"      -> tgtP.asJson,
-        "was_regularized"-> (if wasReg then 1 else 0).asJson,
-        "original_s1"    -> origS1.asJson,
-        "compiled_step"  -> step.asJson,
-        "logged_at"      -> java.time.Instant.now().toString.asJson
-      )
-      mzvBuf += row
+      case PushMZVTriple(s1, s2, s3, conv, srcS, srcP, tgtS, tgtP, wasReg, origS1, step) =>
+        val row = Json.obj(
+          "s1"              -> s1.asJson,
+          "s2"              -> s2.asJson,
+          "s3"              -> s3.asJson,
+          "is_convergent"   -> (if conv then 1 else 0).asJson,
+          "src_sector"      -> srcS.asJson,
+          "src_phase"       -> srcP.asJson,
+          "tgt_sector"      -> tgtS.asJson,
+          "tgt_phase"       -> tgtP.asJson,
+          "was_regularized" -> (if wasReg then 1 else 0).asJson,
+          "original_s1"     -> origS1.asJson,
+          "compiled_step"   -> step.asJson,
+          "logged_at"       -> java.time.Instant.now().toString.asJson
+        )
+        mzvBuf += row
 
-    case SyncTick  => flushAll()
-    case PollTick  => flushMZV()
-    case FlushNow  => flushAll()
+      case SyncTick  => flushAll()
+      case PollTick  => flushMZV()
+      case FlushNow  => flushAll()
 
   // ── Flush helpers ──────────────────────────────────────────────────────────
 
