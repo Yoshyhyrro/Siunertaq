@@ -126,7 +126,8 @@ lazy val core = (project in file("modules/core"))
       // テスト
       "org.apache.pekko" %% "pekko-stream-testkit"       % PekkoVersion % Test,
       "org.apache.pekko" %% "pekko-actor-testkit-typed"  % PekkoVersion % Test,
-      "org.typelevel"    %% "cats-effect-testing-scalatest" % "1.5.0"   % Test
+      "org.typelevel"    %% "cats-effect-testing-scalatest" % "1.5.0"   % Test,
+      "net.bytebuddy" % "byte-buddy" % "1.18.10" % Test
     )
   )
 
@@ -287,6 +288,7 @@ lazy val postgresBridge = (project in file("modules/postgres-bridge"))
     ),
     testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-oDF")
   )
+
 
 // =============================================================================
 // Test settings
