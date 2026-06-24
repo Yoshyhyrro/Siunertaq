@@ -114,18 +114,18 @@ object PerlBridge:
         if exit == 0 then Right(out)
         else Left(s"perl exited $exit: $out")
       finally
-        Files.deleteIfExists(tmp)
+        Files.deleteIfExists(tmp): Unit
 
   // ─── Scala/Perl 相互検証 エントリポイント ────────────────────────────────
   def maybeCheckIO(program: Program, stepName: String): IO[Either[String, Value]] =
     if !sys.env.get("RUN_PERL_CROSSCHECK").contains("1") then
-      IO.pure(Left("[PerlBridge] SKIP: RUN_PERL_CROSSCHECK not set"))
+      IO.pure(Left(s"[PerlBridge] SKIP: RUN_PERL_CROSSCHECK not set (step=$stepName)"))
     else
       perlBinary match
         case None =>
           IO.pure(Left(
             s"[PerlBridge] SKIP: perl not found" +
-            s" (os=${System.getProperty("os.name")}, isWindows=$isWindows)"
+            s" (step=$stepName, os=${System.getProperty("os.name")}, isWindows=$isWindows)"
           ))
         case Some(perl) =>
           ProgramLifter.liftTyped(program) match
