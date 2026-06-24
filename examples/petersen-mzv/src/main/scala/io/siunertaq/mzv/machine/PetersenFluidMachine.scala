@@ -95,4 +95,4 @@ final class PetersenFluidMachine:
             applyPentagonRelation(cur, current, next)
               .flatMap(nextTriple => IO.defer(step(next, nextTriple)))
 
-        step(start, triple)
+    step(start, triple)
