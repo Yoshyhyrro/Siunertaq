@@ -1,7 +1,7 @@
 package io.siunertaq.batch
 
 import cats.effect.{IO, IOApp}
-import org.apache.pekko.actor.{ActorSystem, Props}
+import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.pattern.ask
 import org.apache.pekko.util.Timeout
 import org.springframework.batch.core.repository.support.JobRepositoryFactoryBean
