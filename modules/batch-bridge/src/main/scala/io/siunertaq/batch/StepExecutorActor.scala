@@ -1,7 +1,7 @@
 package io.siunertaq.batch
 
 import org.apache.pekko.actor.{Actor, ActorLogging, Props}
-import org.springframework.batch.core.{ExitStatus, JobParameters, StepExecution}
+import org.springframework.batch.core.JobParameters
 import org.springframework.batch.core.repository.JobRepository
 import org.springframework.batch.core.step.builder.StepBuilder
 import org.springframework.transaction.PlatformTransactionManager
