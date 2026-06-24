@@ -26,8 +26,10 @@ object SiunertaqBatchApp extends IOApp.Simple:
     factory.afterPropertiesSet()
     (factory.getObject, txMgr)
 
+  // IO.bracket は cats-effect 3.x では静的メソッドとして存在しない。
+  // IO[A]#bracket(use)(release) — インスタンスメソッドを使う。
   override def run: IO[Unit] =
-    IO.bracket(IO(ActorSystem("siunertaq-batch")))(runBatch)(sys => IO(sys.terminate()).void)
+    IO(ActorSystem("siunertaq-batch")).bracket(runBatch)(sys => IO(sys.terminate()).void)
 
   private def runBatch(system: ActorSystem): IO[Unit] =
     for
