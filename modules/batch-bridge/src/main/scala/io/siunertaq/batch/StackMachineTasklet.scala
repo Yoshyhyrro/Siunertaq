@@ -83,7 +83,7 @@ final class StackMachineTasklet(
         //  T を固定するのは TypedResult の match — 型安全な関数選択。
 
         val checkResult =
-          PerlBridge.maybeCheckIO(program, stepName).unsafeRunSync()(ioRuntime)
+          PerlBridge.maybeCheckIO(program, stepName).unsafeRunSync()(using ioRuntime)
 
         checkResult match
           case Right(perlValue) =>
