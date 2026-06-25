@@ -6,36 +6,43 @@ import io.siunertaq.mzv.domain._
 // ─── ??? Taxonomy ─────────────────────────────────────────────────────────
 //
 //  Two structurally distinct ??? sites exist in this machine.
-//  Each maps to a different SMT property.
+//  Each maps to a distinct SMT property.
 //
 //  [TOPOLOGY ???]  — TopologyException
 //    Site:    resolveStack / step, when getNeighbors finds no 2-hop path.
-//    Nature:  実部の ??? — topological guarantee from the graph structure.
-//    Status:  DEAD CODE.  P1 (UNSAT) formally proves diameter ≤ 2,
-//             so this arm can never be reached at runtime.
-//    Residue: kept as an explicit guard to make the invariant visible.
+//    Nature:  Real-part ??? — topological guarantee derived from the graph structure.
+//    Status:  DEAD CODE. P1 (UNSAT) formally proves diameter ≤ 2,
+//             meaning this branch is statically unreachable at runtime.
+//    Residue: Preserved as an explicit guard to reify the structural invariant.
 //
 //  [IMAGINARY ???]  — DivergentPoleException
 //    Site:    applyPentagonRelation, when isConvergent = false (s1 = 1).
-//    Nature:  純虚部の ??? — the odd-depth Fischer f9 obstruction.
-//             「辞書としてpopするなら純虚部」: when the stack is treated as
-//             a dictionary, popping the divergent pole is the imaginary key —
-//             it exists in the index but has no finite value.
-//    Status:  LIVE.  P5 (UNSAT) proves s1=1 ∧ s1>1 is impossible, but
-//             s1=1 triples *can* enter the machine (Test Case 2 in Main).
+//    Nature:  Purely imaginary-part ??? — the odd-depth Fischer f9 obstruction.
+//             "Popping as a dictionary yields the purely imaginary part":
+//             when treating the stack as an indexed dictionary, popping the
+//             divergent pole references the imaginary key—resident in the
+//             index but possessing no finite evaluation.
+//    Status:  LIVE. P5 (UNSAT) proves the contradiction of (s1=1 ∧ s1>1), but
+//             s1=1 triples can still inhabit the input space (Test Case 2 in Main).
 //             Dispatched asynchronously to ImaginaryPopperActor.
 //
 // ─────────────────────────────────────────────────────────────────────────
 
-/** Thrown by resolveStack when no 2-hop path exists.
-  * P1 (UNSAT) proves this is structurally unreachable: real-part ???. */
+/** Raised by `resolveStack` when a 2-hop path does not exist.
+  *
+  * P1 (UNSAT) formally proves this state is structurally unreachable, representing
+  * the real-part ??? invariant.
+  */
 final class TopologyException(from: Vertex, to: Vertex)
   extends RuntimeException(
     s"[TOPOLOGY ???] No 2-hop path from $from to $to. " +
     s"(P1/UNSAT guarantees Petersen diameter ≤ 2; this path should not exist.)")
 
-/** Thrown by applyPentagonRelation when s1 = 1.
-  * P5 (UNSAT) documents the contradiction. Caught by ImaginaryPopperActor. */
+/** Raised by `applyPentagonRelation` when encountering `s1 = 1`.
+  *
+  * P5 (UNSAT) formally documents this contradiction. Caught and processed
+  * asynchronously by the `ImaginaryPopperActor`.
+  */
 final class DivergentPoleException(val triple: MZVTriple)
   extends RuntimeException(
     s"[IMAGINARY ???] Divergent pole: s1=${triple.s1}=1. " +

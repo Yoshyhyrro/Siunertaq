@@ -1,7 +1,7 @@
 package io.siunertaq.batch
 
 import org.apache.pekko.actor.{Actor, ActorLogging, Props}
-import org.springframework.batch.core.{ExitStatus, JobExecution, JobInstance, JobParameters, StepExecution}
+import org.springframework.batch.core.JobParameters
 import org.springframework.batch.core.repository.JobRepository
 import org.springframework.batch.core.step.builder.StepBuilder
 import org.springframework.transaction.PlatformTransactionManager
@@ -47,13 +47,11 @@ class StepExecutorActor(
       .tasklet(tasklet, txMgr)
       .build()
 
-    // JobRepository にJobExecution/StepExecution を登録して実行
-    val jobInst  = jobRepository.createJobInstance(
-      "siunertaq", JobParameters()
-    )
-    val jobExec  = jobRepository.createJobExecution(
-      jobInst, JobParameters(), "BatchJob.dhall"
-    )
+    // Spring Batch 5 の JobRepository API:
+    //   createJobExecution(jobName: String, jobParameters: JobParameters): JobExecution
+    //   ※ JobInstance は内部で lookup / 作成される — 引数に渡さない。
+    //   ※ 3引数版 (jobInstance, params, configLocation) は Spring Batch 4 以前の API。
+    val jobExec  = jobRepository.createJobExecution("siunertaq", JobParameters())
     val stepExec = jobExec.createStepExecution(stepDef.name)
     jobRepository.add(stepExec)
 

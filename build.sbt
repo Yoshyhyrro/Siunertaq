@@ -126,7 +126,8 @@ lazy val core = (project in file("modules/core"))
       // テスト
       "org.apache.pekko" %% "pekko-stream-testkit"       % PekkoVersion % Test,
       "org.apache.pekko" %% "pekko-actor-testkit-typed"  % PekkoVersion % Test,
-      "org.typelevel"    %% "cats-effect-testing-scalatest" % "1.5.0"   % Test
+      "org.typelevel"    %% "cats-effect-testing-scalatest" % "1.5.0"   % Test,
+      "net.bytebuddy" % "byte-buddy" % "1.18.10" % Test
     )
   )
 
@@ -278,13 +279,16 @@ lazy val postgresBridge = (project in file("modules/postgres-bridge"))
     name := "Siunertaq-postgres",
     scalacOptions ++= commonScalacOptions,
     libraryDependencies ++= commonDependencies ++ Seq(
-      "org.typelevel"  %% "cats-effect"   % CatsEffectVersion,
-      "org.postgresql" % "postgresql" % "42.7.3",
-      "org.tpolecat" %% "doobie-core" % "1.0.0-RC2",
-      "org.tpolecat" %% "skunk-core" % "0.6.5",
-      "org.ow2.asm"    % "asm"         % "9.7"
-    )
+      "org.typelevel"  %% "cats-effect"       % CatsEffectVersion,
+      "org.postgresql"  % "postgresql"         % "42.7.3",
+      "org.tpolecat"   %% "doobie-core"        % "1.0.0-RC2",
+      "org.tpolecat"   %% "skunk-core"         % "0.6.5",
+      "org.ow2.asm"     % "asm"                % "9.7",
+      "org.apache.pekko" %% "pekko-actor"      % PekkoVersion
+    ),
+    testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-oDF")
   )
+
 
 // =============================================================================
 // Test settings
