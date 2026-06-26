@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - release/v0.1.0.beta.1
+      - feature/ClickHouse_ruby
     paths:
       - build.sbt
       - modules/core/**
       - modules/z3-bridge/**
       - modules/dhall-bridge/**          # CondEvaluatorSpec がここに入る
-      - modules/batch-bridge/build.sbt
+      - modules/batch-bridge/**          # PerlBridge / RubyBridge ソース変更を捕捉
       - modules/yices-bridge/**
       - examples/**               # examples の変更もテストに影響する可能性があるため
       - modules/postgres-bridge/**  # postgres-bridge の変更もテストに影響する可能性があるため
@@ -21,7 +21,7 @@ on:
       - modules/core/**
       - modules/z3-bridge/**
       - modules/dhall-bridge/**
-      - modules/batch-bridge/build.sbt
+      - modules/batch-bridge/**          # PerlBridge / RubyBridge ソース変更を捕捉
       - modules/yices-bridge/**
       - examples/**                      # examples の変更もテストに影響する可能性があるため
       - modules/postgres-bridge/**       # postgres-bridge の変更もテストに影響する可能性があるため
@@ -88,6 +88,54 @@ jobs:
             "postgresBridge/compile"                 \
             "petersenMzv/compile"                    \
             "yicesBridge/testOnly io.siunertaq.yicesbridge.*"
+
+      # ─── 共通ライブラリ成果物 ──────────────────────────────────────────────
+      # compile 済みクラスから JAR を生成する。incremental なので追加コストは小さい。
+      # 対象: core (Program / Instr / Value の IR 定義)
+      #        batch-bridge (PerlBridge / StackMachineTasklet / ScriptBackend)
+      #        postgres-bridge (ClickHouse スキーマ + CDC パイプライン)
+      - name: Package common library JARs
+        if: success()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sbt \
+            "core/package"             \
+            "batchBridge/package"      \
+            "postgresBridge/package"
+
+      - name: Collect common library artifacts
+        if: success()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p ci-out/jars ci-out/schema
+
+          # JAR — core / batch-bridge / postgres-bridge
+          for mod in \
+              "modules/core" \
+              "modules/batch-bridge" \
+              "modules/postgres-bridge"; do
+            find "$mod/target" -maxdepth 3 -name "*.jar" \
+              ! -name "*-sources.jar"                     \
+              ! -name "*-javadoc.jar"                     \
+              -exec cp {} ci-out/jars/ \;
+          done
+
+          # ClickHouse schema SQL (postgres-bridge/src/main/resources/ 以下)
+          find . -path "*/resources/clickhouse_schema.sql" \
+            -exec cp {} ci-out/schema/ \;
+
+          echo "=== ci-out layout ==="
+          find ci-out -type f | sort
+
+      - name: Upload common library
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: siunertaq-common-library-${{ github.sha }}
+          path: ci-out/
+          if-no-files-found: warn
 
       - name: Upload Yices artifacts on failure
         if: failure()
