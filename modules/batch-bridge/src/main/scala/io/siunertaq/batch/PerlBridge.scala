@@ -4,29 +4,35 @@ import cats.effect.IO
 import io.siunertaq.expr.{Instr, Program, ProgramEval, Value}
 import io.siunertaq.expr.ProgramLifter
 
-import java.nio.file.{Files, Paths}
+import java.nio.file.{Files, Paths, StandardCopyOption}
 
-/** Perl (Strawberry / Ubuntu system perl) によるスタックマシン相互検証。
+/** 
+ * Cross-validation harness for the stack machine using Perl (Strawberry / Ubuntu system perl).
  *
- *  OS 分岐:
- *    Windows  → C:\Strawberry\perl\bin\perl.exe → PATH の perl.exe
- *    Linux 等 → /usr/bin/perl → /usr/local/bin/perl → PATH の perl
+ * OS-specific binary resolution:
+ *   - Windows: C:\Strawberry\perl\bin\perl.exe -> PATH-based perl.exe
+ *   - Linux/etc: /usr/bin/perl -> /usr/local/bin/perl -> PATH-based perl
  *
- *  活性化条件: 環境変数 RUN_PERL_CROSSCHECK=1 が設定されていること。
+ * Activation: Enabled only if environment variable `RUN_PERL_CROSSCHECK=1` is set.
  *
- *  maybeCheckIO 戻り値セマンティクス:
- *    Right(v)                     → Scala と Perl が一致、v は共通値
- *    Left("[PerlBridge] SKIP: …") → クロスチェック無効 / perl 未検出 / lift失敗
- *    Left("MISMATCH: …")          → 値が食い違う → StepExecutorActor が FAILED 扱い
- *    Left(その他)                  → Perl 実行 / パースエラー → WARN 扱い
+ * Artifact Persistence (for CI):
+ *   If `PERL_SCRIPT_SAVE_DIR` is defined, the executed .pl script is persisted to 
+ *   `$PERL_SCRIPT_SAVE_DIR/$stepName.pl` before deletion. This allows CI to collect 
+ *   scripts as artifacts alongside .class files (e.g., via ci-out/perl-scripts/).
+ *
+ * Semantics of `maybeCheckIO` return value:
+ *   - Right(v)                     => Success: Scala and Perl results match.
+ *   - Left("[PerlBridge] SKIP: ...") => Ignored: Cross-check disabled, perl not found, or lift failed.
+ *   - Left("MISMATCH: ...")        => Critical: Value divergence. StepExecutorActor treats this as FAILED.
+ *   - Left(Other)                  => Error: Perl execution or parsing failure. Treated as WARN.
  */
 object PerlBridge:
 
-  // ─── OS 判定 ──────────────────────────────────────────────────────────────
+  // --- OS Detection ---------------------------------------------------------
   private val isWindows: Boolean =
     System.getProperty("os.name", "").toLowerCase.contains("win")
 
-  // PATH から実行可能バイナリを探す (空ディレクトリ除外)
+  // Resolve executable binaries from PATH (filtering out empty directories)
   private def findInPath(names: String*): Option[String] =
     val sep  = if isWindows then ";" else ":"
     val dirs = Option(System.getenv("PATH"))
@@ -39,33 +45,34 @@ object PerlBridge:
       .find(Files.isExecutable)
       .map(_.toString)
 
-  /** perl バイナリのフルパス (遅延評価・スレッドセーフ)。
+  /** Full path to the perl binary (lazy-evaluated and thread-safe).
    *
-   *  Ubuntu 26 では /usr/bin/perl がデフォルト。
-   *  Strawberry Perl は C:\Strawberry\perl\bin\perl.exe が標準インストール先。
+   * Standard paths:
+   *   - Ubuntu 26: /usr/bin/perl (default)
+   *   - Strawberry Perl: C:\Strawberry\perl\bin\perl.exe
    */
   lazy val perlBinary: Option[String] =
     if isWindows then
-      // Strawberry Perl の固定パスを優先
+      // Prioritize Strawberry Perl's default installation path
       List(
         raw"C:\Strawberry\perl\bin\perl.exe",
         raw"C:\strawberry\perl\bin\perl.exe"
       ).find(p => Files.isExecutable(Paths.get(p)))
         .orElse(findInPath("perl.exe", "perl"))
     else
-      // Ubuntu / Debian / macOS 共通: システム perl を優先
+      // Linux/macOS: Prioritize system perl
       List("/usr/bin/perl", "/usr/local/bin/perl")
         .find(p => Files.isExecutable(Paths.get(p)))
         .orElse(findInPath("perl"))
 
-  // ─── Program → Perl スクリプト生成 ────────────────────────────────────────
+  // --- Program -> Perl Script Transpilation ----------------------------------
   //
-  //  スタックマシン命令を等価な Perl コードに変換する。
-  //    Scalar: @stack に整数をプッシュ
-  //    Vec3  : @stack に arrayref [x, y, z] をプッシュ
+  // Transpiles stack machine instructions into equivalent Perl code.
+  //   Scalar: Push integer onto @stack
+  //   Vec3  : Push arrayref [x, y, z] onto @stack
   //
-  //  注: Perl の @stack[-1] = TOS (top of stack)
-  //      pop @stack = pop — Scala の ArrayStack.pop と同じ LIFO 順序。
+  // Note: Perl's @stack[-1] represents the Top of Stack (TOS).
+  //       `pop @stack` follows LIFO order, consistent with Scala's ArrayStack.pop.
   private def toPerlScript(program: Program, printExpr: String): String =
     val sb = new StringBuilder(
       "#!/usr/bin/perl\nuse strict;\nuse warnings;\nmy @stack;\n"
@@ -78,7 +85,7 @@ object PerlBridge:
         sb ++= s"push @stack, [$x, $y, $z];\n"
 
       case Instr.AddScalar =>
-        // pop 順: r = top, l = next (Lowering の push 順と逆)
+        // Pop order: r = top, l = next (inverse of Lowering push order)
         sb ++= "{ my $r=pop @stack; my $l=pop @stack; push @stack, $l+$r; }\n"
 
       case Instr.AddVec3 =>
@@ -96,18 +103,29 @@ object PerlBridge:
     sb += '\n'
     sb.toString
 
-  // ─── Perl サブプロセス実行 ─────────────────────────────────────────────────
+  // --- Perl Subprocess Execution ---------------------------------------------
   //
-  //  IO.blocking を使用することで Spring Batch の管理スレッドをブロックしない。
-  //  一時ファイルを作成して perl に渡す (stdin パイプではなくファイル渡しにする
-  //  のは Strawberry Perl の stdin バッファリング問題を回避するため)。
-  def executePerl(script: String, perl: String): IO[Either[String, String]] =
+  // Wrapped in `IO.blocking` to prevent starving the Spring Batch management threads.
+  // We use temporary files instead of stdin pipes to avoid known stdin buffering 
+  // issues encountered with Strawberry Perl.
+  //
+  // If `PERL_SCRIPT_SAVE_DIR` is set, the script is persisted as `$PERL_SCRIPT_SAVE_DIR/$label.pl`
+  // before execution, allowing it to be collected as a CI artifact.
+  def executePerl(script: String, perl: String, label: String): IO[Either[String, String]] =
     IO.blocking:
       val tmp = Files.createTempFile("siunertaq-perl-", ".pl")
       try
         Files.writeString(tmp, script)
+
+        // Persist for CI artifact collection
+        sys.env.get("PERL_SCRIPT_SAVE_DIR").foreach { dir =>
+          val dest = Paths.get(dir).resolve(s"$label.pl")
+          Files.createDirectories(dest.getParent)
+          Files.copy(tmp, dest, StandardCopyOption.REPLACE_EXISTING)
+        }
+
         val proc = new ProcessBuilder(perl, tmp.toString)
-          .redirectErrorStream(true)   // stderr を stdout にマージ
+          .redirectErrorStream(true)   // Merge stderr into stdout
           .start()
         val out  = String(proc.getInputStream.readAllBytes()).trim
         val exit = proc.waitFor()
@@ -116,7 +134,7 @@ object PerlBridge:
       finally
         Files.deleteIfExists(tmp): Unit
 
-  // ─── Scala/Perl 相互検証 エントリポイント ────────────────────────────────
+  // --- Scala/Perl Cross-Validation Entry Point --------------------------------
   def maybeCheckIO(program: Program, stepName: String): IO[Either[String, Value]] =
     if !sys.env.get("RUN_PERL_CROSSCHECK").contains("1") then
       IO.pure(Left(s"[PerlBridge] SKIP: RUN_PERL_CROSSCHECK not set (step=$stepName)"))
@@ -133,17 +151,17 @@ object PerlBridge:
               IO.pure(Left(s"[PerlBridge] SKIP: liftTyped failed: $err"))
             case Right(typedResult) =>
               val script = toPerlScript(program, ProgramLifter.perlPrintFor(typedResult))
-              executePerl(script, perl).map:
+              executePerl(script, perl, stepName).map:
                 case Left(execErr) =>
-                  Left(execErr)   // Perl 実行エラー → WARN (SKIP プレフィックスなし)
+                  Left(execErr)   // Execution error -> Treated as WARN (no SKIP prefix)
 
                 case Right(output) =>
                   ProgramLifter.parseTypedOutput(output, typedResult) match
                     case Left(parseErr) =>
                       Left(s"Perl parse error: $parseErr (output='$output')")
                     case Right(perlValue) =>
-                      // Scala 側を再評価して比較
-                      // (StackMachineTasklet での評価と独立した二重検証)
+                      // Re-evaluate in Scala to ensure double-verification 
+                      // independent of the primary StackMachineTasklet execution.
                       ProgramEval.exec(program) match
                         case Right(sv) if sv == perlValue =>
                           Right(perlValue)
