@@ -2,31 +2,30 @@ package io.siunertaq.batch
 
 import org.apache.pekko.actor.ActorRef
 
-// ─── JCL と対応するメッセージプロトコル ─────────────────────────────────
+// ─── JCL from Siunertaq Batch DSL ───────────────────────────────────────────────
 
-/** JCL JOBカード相当: ジョブ全体の実行を依頼 */
-final case class RunJob(jobDef: BatchJobDef)
+/** that is jcl whith jobcard and exec card, but not jcl syntax */
 
-/** JCL EXECカード相当: 単一ステップの実行を依頼 */
+/** JCL EXEC card equivalent: RunJob is sent to JobSupervisorActor */
 final case class RunStep(
   stepDef:   StepDef,
-  maxPrevRC: Int,       // 前ステップ群の最大RC (COND評価に使用)
-  abended:   Boolean    // 前ステップ群でABENDが発生したか
+  maxPrevRC: Int,       // this is the maximum RC of all previous steps (including skipped steps)
+  abended:   Boolean    // true if any previous step has abended (failed with exception)
 )
 
-/** ステップ正常完了 (スキップを含む) */
+/** step completed (normal or skipped) is sent to JobSupervisorActor */
 final case class StepCompleted(
   stepName: String,
   rc:       Int,
   skipped:  Boolean = false
 )
 
-/** NOTE / WTO相当: JCLの通知機能 */
+/** NOTE / WTO anolosis: Notify is sent to JobSupervisorActor, which will log it and forward it to the parent actor (SiunertaqBatchApp) */
 final case class Notify(level: String, message: String, stepName: String)
 
-/** ジョブ完了 (全ステップ終了後にreplyToへ送信) */
+/** job completed (normal or abended) is sent to SiunertaqBatchApp */
 final case class JobResult(jobName: String, notes: List[String], maxRC: Int)
 
-/** ABEND: 子アクターがこれをthrowするとSupervisorStrategyが捕捉する */
+/** ABEND: child actor (StepExecutorActor) throws StepAbended, which is caught by Pekko Supervisor and treated as ABEND. The parent actor (JobSupervisorActor) will receive Terminated message and recognize it as ABEND. */
 final class StepAbended(val stepName: String, cause: Throwable)
   extends RuntimeException(s"ABEND in step '$stepName'", cause)
