@@ -74,8 +74,8 @@ class PerlBridgeSpec extends AnyFunSpec with Matchers:
       val prog = Vector(
         Instr.PushVec3(1, 2, 3),
         Instr.PushVec3(4, 5, 6),
-        Instr.DotVec3
-      )
+        Instr.AddVec3             // AddVec3: Vec3 × Vec3 → Vec3 ✓
+      )                           // (DotVec3 は Vec3 × Vec3 → Scalar なので不可)
       ProgramLifter.liftTyped(prog) match
         case Right(ProgramLifter.Vec3Typed(_)) => succeed
         case other => fail(s"Expected Vec3Typed, got $other")
