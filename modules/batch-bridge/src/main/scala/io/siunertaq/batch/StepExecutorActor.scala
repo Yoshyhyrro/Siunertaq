@@ -6,15 +6,15 @@ import org.springframework.batch.core.repository.JobRepository
 import org.springframework.batch.core.step.builder.StepBuilder
 import org.springframework.transaction.PlatformTransactionManager
 
-/** 単一ステップを担当するPekkoアクター。JCLの「ステップ実行スレッド」に相当。
+/** single step executor actor for a single step execution
  *
- *  ① CondEvaluator でスキップ判定
- *  ② スキップ → 親に StepCompleted(skipped=true) を送信
- *  ③ 実行   → StackMachineTasklet を Spring Batch Step として起動
- *  ④ ABEND  → StepAbended をthrow (Pekko Supervisor が OneForOneStrategy で Stop)
+ *  ① CondEvaluator → CondEvaluator.shouldSkip(cond, maxPrevRC, abended)
+ *  ② skip   → StepCompleted(stepDef.name, rc=0, skipped = true)
+ *  ③ execute → StackMachineTasklet as Spring Batch Step
+ *  ④ ABEND  → StepAbended thrown (Pekko Supervisor applies OneForOneStrategy Stop)
  *
- *  NOTE: step.execute() はブロッキング。
- *  本番では "batch-blocking-dispatcher" 等の専用スレッドプールを使用すること。
+ *  NOTE: step.execute() is blocking.
+ *  In production, use a dedicated thread pool like "batch-blocking-dispatcher".
  */
 class StepExecutorActor(
   jobRepository: JobRepository,
@@ -37,8 +37,8 @@ class StepExecutorActor(
           context.stop(self)
         catch
           case ex: Throwable =>
-            // Pekko Supervisor に伝播 → OneForOneStrategy が Stop を適用
-            // 親の Terminated ハンドラがABENDとして認識する
+            // Pekko Supervisor will treat this as ABEND and stop the actor
+            // Parent's Terminated handler will recognize this as ABEND
             throw StepAbended(stepDef.name, ex)
 
   private def runSpringBatchStep(stepDef: StepDef): Int =
@@ -47,10 +47,10 @@ class StepExecutorActor(
       .tasklet(tasklet, txMgr)
       .build()
 
-    // Spring Batch 5 の JobRepository API:
+    // Spring Batch 5 with Pekko Actor: JobExecutionContext is not available in the constructor of Tasklet.
     //   createJobExecution(jobName: String, jobParameters: JobParameters): JobExecution
-    //   ※ JobInstance は内部で lookup / 作成される — 引数に渡さない。
-    //   ※ 3引数版 (jobInstance, params, configLocation) は Spring Batch 4 以前の API。
+    //   JobInstance is created if not exists, JobExecution is created and returned.
+    //   ver3.0.0: JobExecutionContext is available in the constructor of Tasklet.
     val jobExec  = jobRepository.createJobExecution("siunertaq", JobParameters())
     val stepExec = jobExec.createStepExecution(stepDef.name)
     jobRepository.add(stepExec)
