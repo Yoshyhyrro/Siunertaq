@@ -9,35 +9,36 @@ import org.springframework.batch.core.repository.JobRepository
 import org.springframework.transaction.PlatformTransactionManager
 import scala.concurrent.duration._
 
-/** JES2 / MVS スーパーバイザー相当のPekkoアクター。
+/** JES2 / MVS Job Supervisor Actor
  *
- *  ・OneForOneStrategy: 子ステップのABENDをシステム全体から隔離し
- *    その子アクターのみを安全停止 (Stop) させる。
- *    残りのステップは影響なく継続または COND=ONLY でリカバリ実行される。
+ *  ・OneForOneStrategy: child actor (StepExecutorActor) is stopped (Stop) on StepAbended (ABEND), restarted (Restart) on other exceptions.
+ *    This is equivalent to JCL ABEND, which stops only the child actor that ab
+ *    the ABEND, and continues with the remaining steps. Other exceptions are retried once.
+ *    
  *
- *  ・Terminated ハンドラ: StepCompleted を送らずに停止した子 = ABEND と判定。
+ *  ・Terminated handler: child actor (StepExecutorActor) is stopped without sending StepCompleted → ABEND (StepAbended) is detected.
  *
- *  ・Notify: JCLの WTO (Write To Operator) / MSGCLASS Note に相当するログ収集。
+ *  ・Notify: JCL WTO / NOTE equivalent. StepExecutorActor sends Notify to JobSupervisorActor, which logs it and forwards it to the parent actor (SiunertaqBatchApp).
  */
 class JobSupervisorActor(
   jobRepository: JobRepository,
   txMgr:         PlatformTransactionManager
 ) extends Actor with ActorLogging:
 
-  // ABEND: 子を再起動せず安全停止 (JCL ABEND相当)。他の例外は1回リトライ。
+  // ABEND: child actor (StepExecutorActor) throws StepAbended, which is caught by Pekko Supervisor and treated as ABEND. The parent actor (JobSupervisorActor) will receive Terminated message and recognize it as ABEND.
   override val supervisorStrategy: SupervisorStrategy =
     OneForOneStrategy(maxNrOfRetries = 1, withinTimeRange = 1.minute):
       case _: StepAbended => Stop
       case _: Exception   => SupervisorStrategy.Restart
 
-  // ─── ジョブ実行状態 ─────────────────────────────────────────────────
+  // ─── job state ───────────────────────────────────────────────────────────────
   private var remainingSteps: List[StepDef] = Nil
   private var maxRC:          Int           = 0
   private var abended:        Boolean       = false
   private var replyTo:        Option[ActorRef] = None
   private val notes:          scala.collection.mutable.ArrayBuffer[String] = 
     scala.collection.mutable.ArrayBuffer.empty
-  private var pendingStepName: Option[String] = None   // Terminated検出用
+  private var pendingStepName: Option[String] = None   // Terminated detection
 
   def receive: Receive =
 
@@ -60,7 +61,7 @@ class JobSupervisorActor(
       notes += entry
 
     case Terminated(ref) =>
-      // StepCompletedを送らずに停止 → ABEND と判定 (JCL ABEND相当)
+      // StepCompleted not sent → ABEND detected (equivalent to JCL ABEND)
       pendingStepName.foreach { name =>
         log.error("[ABEND] step={} actor stopped without completion", name)
         notes += s"[ABEND] $name: actor terminated without StepCompleted"
@@ -80,7 +81,7 @@ class JobSupervisorActor(
           StepExecutorActor.props(jobRepository, txMgr),
           name = s"step-${stepDef.name}"
         )
-        context.watch(actor)   // Terminated で ABEND を検出
+        context.watch(actor)   // Terminated is sent if child actor stops without sending StepCompleted → ABEND detection
         pendingStepName = Some(stepDef.name)
         actor ! RunStep(stepDef, maxRC, abended)
 
