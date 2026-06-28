@@ -1,3 +1,4 @@
+
 package io.siunertaq.batch
 
 import cats.effect.IO
@@ -8,42 +9,42 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Paths, StandardCopyOption}
 import java.util.Comparator
 
-/** Perl (Strawberry / Ubuntu system perl) によるスタックマシン相互検証。
+/** Cross-verification of the stack machine using Perl (Strawberry / Ubuntu system perl).
  *
- *  OS 分岐:
- *    Windows  → C:\Strawberry\perl\bin\perl.exe → PATH の perl.exe
- *    Linux 等 → /usr/bin/perl → /usr/local/bin/perl → PATH の perl
+ *  OS-specific binary resolution:
+ *    Windows  → C:\Strawberry\perl\bin\perl.exe → perl.exe in PATH
+ *    Linux etc. → /usr/bin/perl → /usr/local/bin/perl → perl in PATH
  *
- *  活性化条件: 環境変数 RUN_PERL_CROSSCHECK=1 が設定されていること。
+ *  Activation condition: Environment variable RUN_PERL_CROSSCHECK=1 must be set.
  *
- *  中間形式 JSON (Program.toJson):
+ *  Intermediate JSON representation (Program.toJson):
  *    Scala Program → JSON → Siunertaq::StackMachine->execute_json (Perl)
- *    同じ JSON が ClassASTBridge (.class → JSON) および
- *    ForthRegistrar.registerStep (PostgreSQL JSONB) と共通の中間表現。
+ *    This same JSON is used as a common intermediate representation for 
+ *    ClassASTBridge (.class → JSON) and ForthRegistrar.registerStep (PostgreSQL JSONB).
  *
- *  スクリプト構成:
+ *  Script layout:
  *    $tmpDir/
- *      $label.pl              ← Program.toJson を execute_json に渡す薄いグルー
+ *      $label.pl              ← Thin glue script passing Program.toJson to execute_json
  *      Siunertaq/
- *        StackMachine.pm      ← classpath リソースから展開 (JSON::PP で実装)
+ *        StackMachine.pm      ← Extracted from classpath resource (implemented with JSON::PP)
  *
- *  生成スクリプトの永続化 (CI artifact 収集用):
- *    PERL_SCRIPT_SAVE_DIR が設定されていれば .pl と Siunertaq/StackMachine.pm を
- *    保存する。ci-out/perl-scripts/ を指定することで .class と並んで artifact に収まる。
+ *  Persistence of generated scripts (for CI artifact collection):
+ *    If PERL_SCRIPT_SAVE_DIR is set, .pl and Siunertaq/StackMachine.pm are saved.
+ *    Specifying ci-out/perl-scripts/ allows them to be archived as artifacts alongside .class files.
  *
- *  maybeCheckIO 戻り値セマンティクス:
- *    Right(v)                     → Scala と Perl が一致、v は共通値
- *    Left("[PerlBridge] SKIP: …") → クロスチェック無効 / perl 未検出 / lift失敗
- *    Left("MISMATCH: …")          → 値が食い違う → StepExecutorActor が FAILED 扱い
- *    Left(その他)                  → Perl 実行 / パースエラー → WARN 扱い
+ *  maybeCheckIO return value semantics:
+ *    Right(v)                     → Scala and Perl results match; v is the common value
+ *    Left("[PerlBridge] SKIP: …") → Cross-check disabled / perl not found / lift failed
+ *    Left("MISMATCH: …")          → Values diverge → StepExecutorActor treats as FAILED
+ *    Left(other)                  → Perl execution / parse error → treated as WARN
  */
 object PerlBridge:
 
-  // ─── OS 判定 ──────────────────────────────────────────────────────────────
+  // ─── OS Detection ──────────────────────────────────────────────────────────
   private val isWindows: Boolean =
     System.getProperty("os.name", "").toLowerCase.contains("win")
 
-  // PATH から実行可能バイナリを探す (空ディレクトリ除外)
+  // Search for executable binaries in PATH (excluding empty directories)
   private def findInPath(names: String*): Option[String] =
     val sep  = if isWindows then ";" else ":"
     val dirs = Option(System.getenv("PATH"))
@@ -56,28 +57,28 @@ object PerlBridge:
       .find(Files.isExecutable)
       .map(_.toString)
 
-  /** perl バイナリのフルパス (遅延評価・スレッドセーフ)。
+  /** Full path to the perl binary (lazy and thread-safe).
    *
-   *  Ubuntu 26 では /usr/bin/perl がデフォルト。
-   *  Strawberry Perl は C:\Strawberry\perl\bin\perl.exe が標準インストール先。
+   *  Ubuntu 26 defaults to /usr/bin/perl.
+   *  Strawberry Perl standard installation path: C:\Strawberry\perl\bin\perl.exe.
    */
   lazy val perlBinary: Option[String] =
     if isWindows then
-      // Strawberry Perl の固定パスを優先
+      // Prioritize fixed Strawberry Perl paths
       List(
         raw"C:\Strawberry\perl\bin\perl.exe",
         raw"C:\strawberry\perl\bin\perl.exe"
       ).find(p => Files.isExecutable(Paths.get(p)))
         .orElse(findInPath("perl.exe", "perl"))
     else
-      // Ubuntu / Debian / macOS 共通: システム perl を優先
+      // Ubuntu / Debian / macOS: Prioritize system perl
       List("/usr/bin/perl", "/usr/local/bin/perl")
         .find(p => Files.isExecutable(Paths.get(p)))
         .orElse(findInPath("perl"))
 
-  // ─── StackMachine.pm classpath リソース ──────────────────────────────────
-  //  batch-bridge JAR の /perl/Siunertaq/StackMachine.pm から読み込む。
-  //  初回アクセス時のみロード (lazy + スレッドセーフ)。
+  // ─── StackMachine.pm classpath resource ──────────────────────────────────
+  //  Loaded from /perl/Siunertaq/StackMachine.pm in the batch-bridge JAR.
+  //  Loaded only on first access (lazy + thread-safe).
   private lazy val stackMachinePm: String =
     val path = "/perl/Siunertaq/StackMachine.pm"
     Option(getClass.getResourceAsStream(path))
@@ -87,11 +88,11 @@ object PerlBridge:
       }
       .getOrElse(throw new java.io.FileNotFoundException(
         s"Classpath resource not found: $path — " +
-        "StackMachine.pm は batch-bridge/src/main/resources/perl/Siunertaq/ に置いてください"
+        "Please place StackMachine.pm in batch-bridge/src/main/resources/perl/Siunertaq/"
       ))
 
-  // ─── Program → 薄いグルー .pl ──────────────────────────────────────────────
-  //  ロジックは Siunertaq::StackMachine.execute_json (Perl 側) が持つ。
+  // ─── Program → Thin glue .pl ──────────────────────────────────────────────
+  //  Execution logic resides in Siunertaq::StackMachine->execute_json (Perl side).
   //  printMethod: "print_scalar" | "print_vec3"
   private def toPerlScript(program: Program, printMethod: String): String =
     val json = Program.toJson(program).noSpaces
@@ -106,31 +107,31 @@ object PerlBridge:
        |$$sm->$printMethod();
        |""".stripMargin
 
-  // ─── Perl サブプロセス実行 ─────────────────────────────────────────────────
+  // ─── Perl subprocess execution ─────────────────────────────────────────────────
   //
-  //  IO.blocking を使用することで Spring Batch の管理スレッドをブロックしない。
+  //  Using IO.blocking to avoid blocking Spring Batch management threads.
   //
-  //  実行ディレクトリ構成:
+  //  Execution directory structure:
   //    $tmpDir/
-  //      $label.pl              ← .pl スクリプト (FindBin::Bin = $tmpDir)
+  //      $label.pl              ← .pl script (FindBin::Bin = $tmpDir)
   //      Siunertaq/
-  //        StackMachine.pm      ← classpath から展開; use lib で参照
+  //        StackMachine.pm      ← Extracted from classpath; referenced via 'use lib'
   //
-  //  PERL_SCRIPT_SAVE_DIR が設定されている場合は同じ構成でコピーを保存。
+  //  If PERL_SCRIPT_SAVE_DIR is set, a copy is saved using the same structure.
   def executePerl(script: String, perl: String, label: String): IO[Either[String, String]] =
     IO.blocking:
       val tmpDir    = Files.createTempDirectory("siunertaq-perl-")
       val scriptFile = tmpDir.resolve(s"$label.pl")
       val pmDir      = tmpDir.resolve("Siunertaq")
       try
-        // .pl を書き出す
+        // Write .pl script
         Files.writeString(scriptFile, script)
 
-        // Siunertaq/StackMachine.pm を classpath から展開
+        // Extract Siunertaq/StackMachine.pm from classpath
         Files.createDirectories(pmDir)
         Files.writeString(pmDir.resolve("StackMachine.pm"), stackMachinePm)
 
-        // CI artifact 収集用: PERL_SCRIPT_SAVE_DIR に .pl と .pm を永続保存
+        // For CI artifact collection: permanently save .pl and .pm to PERL_SCRIPT_SAVE_DIR
         sys.env.get("PERL_SCRIPT_SAVE_DIR").foreach { saveDir =>
           val dest   = Paths.get(saveDir)
           val destPm = dest.resolve("Siunertaq")
@@ -142,7 +143,7 @@ object PerlBridge:
             destPm.resolve("StackMachine.pm"), StandardCopyOption.REPLACE_EXISTING)
         }
 
-        // perl を tmpDir 配下で起動 ($FindBin::Bin = tmpDir)
+        // Invoke perl within tmpDir ($FindBin::Bin = tmpDir)
         val proc = new ProcessBuilder(perl, scriptFile.toString)
           .directory(tmpDir.toFile)
           .redirectErrorStream(true)
@@ -152,27 +153,27 @@ object PerlBridge:
         if exit == 0 then Right(out)
         else Left(s"perl exited $exit: $out")
       finally
-        // tmpDir を再帰削除 (最深部から順に削除)
+        // Recursively delete tmpDir (bottom-up)
         Files.walk(tmpDir)
           .sorted(Comparator.reverseOrder())
           .forEach(p => Files.deleteIfExists(p): Unit)
 
-  // ─── 公開 API (テスト・外部呼び出し用) ──────────────────────────────────
+  // ─── Public API (for tests and external calls) ──────────────────────────────────
 
-  /** perl バイナリが見つかるかどうか（テスト・ガード用）。 */
+  /** Checks if perl binary is available (for testing/guards). */
   def isAvailable: Boolean = perlBinary.isDefined
 
-  /** エラーメッセージ用バイナリ名（見つからない場合は "perl"）。 */
+  /** Binary name for error messages (defaults to "perl" if not found). */
   def perlBin: String = perlBinary.getOrElse("perl")
 
-  /** スクリプト生成を外部から確認するための公開ラッパー (PerlBridgeSpec §3)。
+  /** Public wrapper to verify script generation from outside (PerlBridgeSpec §3).
    *  printMethod: "print_scalar" | "print_vec3"
    */
   def generatePerl(program: Program, printMethod: String): String =
     toPerlScript(program, printMethod)
 
-  /** Program を Perl で評価し Value を返す (PerlBridgeSpec §5)。
-   *  ProgramEval.exec と同じ型 Either[String, Value] を IO に包む。
+  /** Evaluates Program via Perl and returns a Value (PerlBridgeSpec §5).
+   *  Returns IO[Either[String, Value]], matching ProgramEval.exec.
    */
   def runViaPerl(program: Program): IO[Either[String, Value]] =
     perlBinary match
@@ -190,13 +191,13 @@ object PerlBridge:
               case Left(err)  => Left(err)
               case Right(out) => ProgramLifter.parseTypedOutput(out, typedResult)
 
-  /** Perl 実行結果を返す (PerlBridgeSpec §6)。
-   *  呼び出し側で ProgramEval.exec 結果と比較する。
+  /** Returns Perl execution result (PerlBridgeSpec §6).
+   *  The caller should compare this with the result of ProgramEval.exec.
    */
   def crossCheck(program: Program): IO[Either[String, Value]] =
     runViaPerl(program)
 
-  // ─── Scala/Perl 相互検証 エントリポイント ────────────────────────────────
+  // ─── Scala/Perl Cross-Verification Entry Point ────────────────────────────────
   def maybeCheckIO(program: Program, stepName: String): IO[Either[String, Value]] =
     if !sys.env.get("RUN_PERL_CROSSCHECK").contains("1") then
       IO.pure(Left(s"[PerlBridge] SKIP: RUN_PERL_CROSSCHECK not set (step=$stepName)"))
@@ -218,15 +219,15 @@ object PerlBridge:
               val script = toPerlScript(program, printMethod)
               executePerl(script, perl, stepName).map:
                 case Left(execErr) =>
-                  Left(execErr)   // Perl 実行エラー → WARN (SKIP プレフィックスなし)
+                  Left(execErr)   // Perl execution error → treated as WARN (no SKIP prefix)
 
                 case Right(output) =>
                   ProgramLifter.parseTypedOutput(output, typedResult) match
                     case Left(parseErr) =>
                       Left(s"Perl parse error: $parseErr (output='$output')")
                     case Right(perlValue) =>
-                      // Scala 側を再評価して比較
-                      // (StackMachineTasklet での評価と独立した二重検証)
+                      // Re-evaluate on the Scala side for comparison
+                      // (Independent double-verification separate from StackMachineTasklet evaluation)
                       ProgramEval.exec(program) match
                         case Right(sv) if sv == perlValue =>
                           Right(perlValue)
