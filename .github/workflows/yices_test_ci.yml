@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - feature/ClickHouse_ruby
+      - example/feature/jvm-mzv_postgres_to_ClickHouse
     paths:
       - build.sbt
       - modules/core/**
