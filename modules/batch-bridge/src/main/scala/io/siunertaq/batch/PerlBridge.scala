@@ -157,6 +157,45 @@ object PerlBridge:
           .sorted(Comparator.reverseOrder())
           .forEach(p => Files.deleteIfExists(p): Unit)
 
+  // ─── 公開 API (テスト・外部呼び出し用) ──────────────────────────────────
+
+  /** perl バイナリが見つかるかどうか（テスト・ガード用）。 */
+  def isAvailable: Boolean = perlBinary.isDefined
+
+  /** エラーメッセージ用バイナリ名（見つからない場合は "perl"）。 */
+  def perlBin: String = perlBinary.getOrElse("perl")
+
+  /** スクリプト生成を外部から確認するための公開ラッパー (PerlBridgeSpec §3)。
+   *  printMethod: "print_scalar" | "print_vec3"
+   */
+  def generatePerl(program: Program, printMethod: String): String =
+    toPerlScript(program, printMethod)
+
+  /** Program を Perl で評価し Value を返す (PerlBridgeSpec §5)。
+   *  ProgramEval.exec と同じ型 Either[String, Value] を IO に包む。
+   */
+  def runViaPerl(program: Program): IO[Either[String, Value]] =
+    perlBinary match
+      case None => IO.pure(Left(
+        s"perl not found (isWindows=$isWindows, perlBin=$perlBin)"
+      ))
+      case Some(perl) =>
+        ProgramLifter.liftTyped(program) match
+          case Left(err) => IO.pure(Left(s"liftTyped failed: $err"))
+          case Right(typedResult) =>
+            val pm = typedResult match
+              case ProgramLifter.ScalarTyped(_) => "print_scalar"
+              case ProgramLifter.Vec3Typed(_)   => "print_vec3"
+            executePerl(toPerlScript(program, pm), perl, "runViaPerl").map:
+              case Left(err)  => Left(err)
+              case Right(out) => ProgramLifter.parseTypedOutput(out, typedResult)
+
+  /** Perl 実行結果を返す (PerlBridgeSpec §6)。
+   *  呼び出し側で ProgramEval.exec 結果と比較する。
+   */
+  def crossCheck(program: Program): IO[Either[String, Value]] =
+    runViaPerl(program)
+
   // ─── Scala/Perl 相互検証 エントリポイント ────────────────────────────────
   def maybeCheckIO(program: Program, stepName: String): IO[Either[String, Value]] =
     if !sys.env.get("RUN_PERL_CROSSCHECK").contains("1") then
