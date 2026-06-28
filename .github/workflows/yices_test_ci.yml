@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - example/feature/jvm-mzv_postgres_to_ClickHouse
+      - feature/ClickHouse_ruby
     paths:
       - build.sbt
       - modules/core/**
       - modules/z3-bridge/**
       - modules/dhall-bridge/**          # CondEvaluatorSpec がここに入る
-      - modules/batch-bridge/build.sbt
+      - modules/batch-bridge/**          # PerlBridge / RubyBridge ソース変更を捕捉
       - modules/yices-bridge/**
       - examples/**               # examples の変更もテストに影響する可能性があるため
       - modules/postgres-bridge/**  # postgres-bridge の変更もテストに影響する可能性があるため
@@ -21,7 +21,7 @@ on:
       - modules/core/**
       - modules/z3-bridge/**
       - modules/dhall-bridge/**
-      - modules/batch-bridge/build.sbt
+      - modules/batch-bridge/**          # PerlBridge / RubyBridge ソース変更を捕捉
       - modules/yices-bridge/**
       - examples/**                      # examples の変更もテストに影響する可能性があるため
       - modules/postgres-bridge/**       # postgres-bridge の変更もテストに影響する可能性があるため
@@ -40,6 +40,8 @@ jobs:
     env:
       RUN_YICES_SMOKE: "1"
       YICES_ARTIFACT_DIR: modules/yices-bridge/target/yices-artifacts
+      RUN_PERL_CROSSCHECK: "1"                       # PerlBridgeSpec + .pl スクリプト生成を有効化
+      PERL_SCRIPT_SAVE_DIR: ci-out/perl-scripts      # 生成 .pl を artifact として保持
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -81,13 +83,94 @@ jobs:
         run: |
           set -euxo pipefail
           sbt \
-            "core/testOnly io.siunertaq.threshold.*" \
-            "z3Bridge/compile"                       \
-            "yicesBridge/compile"                    \
-            "batchBridge/compile"                    \
-            "postgresBridge/compile"                 \
-            "petersenMzv/compile"                    \
+            "core/testOnly io.siunertaq.threshold.*"           \
+            "z3Bridge/compile"                                  \
+            "yicesBridge/compile"                               \
+            "batchBridge/compile"                               \
+            "batchBridge/testOnly io.siunertaq.batch.PerlBridgeSpec" \
+            "postgresBridge/compile"                            \
+            "petersenMzv/compile"                              \
             "yicesBridge/testOnly io.siunertaq.yicesbridge.*"
+
+      # ─── 共通ライブラリ成果物 ──────────────────────────────────────────────
+      # compile 済みクラスから JAR を生成する。incremental なので追加コストは小さい。
+      # 対象: core (Program / Instr / Value の IR 定義)
+      #        batch-bridge (PerlBridge / StackMachineTasklet / ScriptBackend)
+      #        postgres-bridge (ClickHouse スキーマ + CDC パイプライン)
+      - name: Package common library JARs
+        if: success()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sbt \
+            "core/package"             \
+            "batchBridge/package"      \
+            "postgresBridge/package"
+
+      - name: Collect common library artifacts
+        if: success()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p ci-out/schema ci-out/perl-scripts   # perl-scripts は find 前に必ず作る
+
+          # ── JAR: モジュール別サブディレクトリに収める (同名上書き防止) ───────
+          for mod in core batch-bridge postgres-bridge; do
+            src="modules/$mod/target"
+            dest="ci-out/jars/$mod"
+            mkdir -p "$dest"
+            find "$src" -maxdepth 3 -name "*.jar" \
+              ! -name "*-sources.jar"              \
+              ! -name "*-javadoc.jar"              \
+              -print0 | xargs -0 -I{} cp {} "$dest/"
+          done
+
+          # ── .class: package パスを保持して収集 ───────────────────────────
+          # target/scala-3.x.x/classes/ 以下は depth 4+ → maxdepth なしで探索
+          # ${f##*/classes/} で classes/ 以降のパスだけ取り出してコピー
+          for mod in core batch-bridge; do
+            find "modules/$mod/target" -name "*.class" -path "*/classes/io/*" \
+              -print0 | while IFS= read -r -d '' f; do
+                rel="${f##*/classes/}"
+                dest="ci-out/classes/$mod/$rel"
+                mkdir -p "$(dirname "$dest")"
+                cp "$f" "$dest"
+              done
+          done
+
+          # ── .pl: PERL_SCRIPT_SAVE_DIR に保存済みのスクリプト ─────────────
+          # PerlBridge.executePerl が RUN_PERL_CROSSCHECK=1 の実行時に書き出す
+          pl_dir="${PERL_SCRIPT_SAVE_DIR:-ci-out/perl-scripts}"
+          pl_count=$(find "$pl_dir" -name "*.pl" 2>/dev/null | wc -l)
+          echo ".pl scripts collected: $pl_count"
+
+          # ── .pm: batch-bridge リソース内の Perl モジュール (あれば) ──────
+          pm_src="modules/batch-bridge/src/main/resources"
+          if find "$pm_src" \( -name "*.pm" -o -name "*.pl" \) -quit 2>/dev/null \
+             | grep -q .; then
+            find "$pm_src" \( -name "*.pm" -o -name "*.pl" \) \
+              -print0 | while IFS= read -r -d '' f; do
+                rel="${f#$pm_src/}"          # perl/Siunertaq/StackMachine.pm
+                dest="ci-out/perl/$rel"
+                mkdir -p "$(dirname "$dest")"
+                cp "$f" "$dest"
+              done
+          fi
+
+          # ── ClickHouse schema SQL ──────────────────────────────────────────
+          find . -path "*/resources/clickhouse_schema.sql" \
+            -print0 | xargs -0 -I{} cp {} ci-out/schema/
+
+          echo "=== ci-out layout ==="
+          find ci-out -type f | sort
+
+      - name: Upload common library
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: siunertaq-common-library-${{ github.sha }}
+          path: ci-out/
+          if-no-files-found: warn
 
       - name: Upload Yices artifacts on failure
         if: failure()
