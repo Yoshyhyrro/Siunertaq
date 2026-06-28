@@ -1,3 +1,4 @@
+
 package io.siunertaq.batch
 
 import cats.effect.unsafe.IORuntime
@@ -7,17 +8,17 @@ import org.scalatest.matchers.should.Matchers
 
 // ─── PerlBridgeSpec ──────────────────────────────────────────────────────────
 //
-//  GADTとの整合検証 + Perl subprocess 統合テスト。
+//  GADT consistency verification and Perl subprocess integration tests.
 //
-//  Unit テスト (Perl 不要):
-//    §1  ProgramLifter.liftProgram  — Lowering の逆
+//  Unit tests (Perl not required):
+//    §1  ProgramLifter.liftProgram  — Inverse of lowering
 //    §2  ProgramLifter.liftTyped    — TypedResult (GADT dispatch)
-//    §3  PerlBridge.generatePerl    — JSON 形式スクリプト生成
-//    §4  TypedParser typeclass      — T に応じた parse 関数
+//    §3  PerlBridge.generatePerl    — JSON-formatted script generation
+//    §4  TypedParser typeclass      — Parse functions based on type T
 //
-//  Integration テスト (RUN_PERL_CROSSCHECK=1 かつ perl が PATH 上にある場合):
-//    §5  PerlBridge.runViaPerl      — Perl で実際に評価
-//    §6  PerlBridge.crossCheck      — Scala == Perl 検証
+//  Integration tests (requires RUN_PERL_CROSSCHECK=1 and perl in PATH):
+//    §5  PerlBridge.runViaPerl      — Actual evaluation via Perl
+//    §6  PerlBridge.crossCheck      — Scala vs Perl cross-verification
 
 class PerlBridgeSpec extends AnyFunSpec with Matchers:
 
@@ -27,7 +28,7 @@ class PerlBridgeSpec extends AnyFunSpec with Matchers:
 
   describe("ProgramLifter.liftProgram"):
 
-    it("PushScalar → ConstScalar (単値)"):
+    it("PushScalar → ConstScalar (single value)"):
       ProgramLifter.liftProgram(Vector(Instr.PushScalar(42))).shouldBe(
         Right(Expr.ConstScalar(42))
       )
@@ -38,7 +39,7 @@ class PerlBridgeSpec extends AnyFunSpec with Matchers:
         Right(Expr.Add(Expr.ConstScalar(3), Expr.ConstScalar(4)))
       )
 
-    it("Lowering ラウンドトリップ: liftProgram(lower(e)) == Right(e)"):
+    it("Lowering round-trip: liftProgram(lower(e)) == Right(e)"):
       val exprs = List(
         Expr.ConstScalar(7),
         Expr.Add(Expr.ConstScalar(2), Expr.ConstScalar(5)),
@@ -53,34 +54,34 @@ class PerlBridgeSpec extends AnyFunSpec with Matchers:
         val lowered = Lowering.lower(e).getOrElse(Vector.empty)
         ProgramLifter.liftProgram(lowered).shouldBe(Right(e))
 
-    it("空プログラム → スタックに値が残らない (Left)"):
+    it("Empty program → stack empty (Left)"):
       ProgramLifter.liftProgram(Vector.empty).isLeft.shouldBe(true)
 
-    it("スタック不足 (AddScalar, 0 values) → Left"):
+    it("Stack underflow (AddScalar, 0 values) → Left"):
       ProgramLifter.liftProgram(Vector(Instr.AddScalar)).isLeft.shouldBe(true)
 
   // ── §2  ProgramLifter.liftTyped — TypedResult (GADT dispatch) ──────────────
 
   describe("ProgramLifter.liftTyped"):
 
-    it("Scalar プログラム → ScalarTyped"):
+    it("Scalar program → ScalarTyped"):
       val prog = Vector(Instr.PushScalar(3), Instr.PushScalar(4), Instr.MulScalar)
       ProgramLifter.liftTyped(prog) match
         case Right(ProgramLifter.ScalarTyped(expr)) =>
           expr.shouldBe(TypedExpr.TMul(TypedExpr.TConstScalar(3), TypedExpr.TConstScalar(4)))
         case other => fail(s"Expected ScalarTyped, got $other")
 
-    it("Vec3 プログラム → Vec3Typed"):
+    it("Vec3 program → Vec3Typed"):
       val prog = Vector(
         Instr.PushVec3(1, 2, 3),
         Instr.PushVec3(4, 5, 6),
         Instr.AddVec3             // AddVec3: Vec3 × Vec3 → Vec3 ✓
-      )                           // (DotVec3 は Vec3 × Vec3 → Scalar なので不可)
+      )                           // (DotVec3 is Vec3 × Vec3 → Scalar, so not applicable)
       ProgramLifter.liftTyped(prog) match
         case Right(ProgramLifter.Vec3Typed(_)) => succeed
         case other => fail(s"Expected Vec3Typed, got $other")
 
-    it("Dot(Vec3, Vec3) → ScalarTyped (DotVec3 は Scalar を返す)"):
+    it("Dot(Vec3, Vec3) → ScalarTyped (DotVec3 returns Scalar)"):
       val prog = Vector(
         Instr.PushVec3(1, 0, 0),
         Instr.PushVec3(0, 1, 0),
@@ -90,28 +91,28 @@ class PerlBridgeSpec extends AnyFunSpec with Matchers:
         case Right(ProgramLifter.ScalarTyped(_)) => succeed
         case other => fail(s"Expected ScalarTyped for Dot result, got $other")
 
-  // ── §3  PerlBridge.generatePerl — JSON 形式スクリプト生成 ─────────────────
+  // ── §3  PerlBridge.generatePerl — JSON-formatted script generation ──────────
   //
-  //  新方式: ロジックは Siunertaq::StackMachine.pm に集約し、
-  //  生成スクリプトは Program.toJson の JSON を execute_json に渡すだけ。
-  //  (旧方式の "push @stack, N;" 等のインライン Perl は不在)
+  //  New approach: Logic is consolidated in Siunertaq::StackMachine.pm.
+  //  Generated scripts now simply pass the JSON from Program.toJson to execute_json.
+  //  (Replaces old approach of inlining Perl like "push @stack, N;")
 
   describe("PerlBridge.generatePerl"):
 
-    it("Siunertaq::StackMachine を use する"):
+    it("ensure 'use Siunertaq::StackMachine'"):
       val code = PerlBridge.generatePerl(Vector(Instr.PushScalar(42)), "print_scalar")
       code.should(include("Siunertaq::StackMachine"))
 
-    it("execute_json を呼び出す"):
+    it("ensure call to execute_json"):
       val code = PerlBridge.generatePerl(Vector(Instr.PushScalar(42)), "print_scalar")
       code.should(include("execute_json"))
 
-    it("PushScalar(42) → JSON に \"PushScalar\" と 42 が含まれる"):
+    it("PushScalar(42) → JSON should contain \"PushScalar\" and 42"):
       val code = PerlBridge.generatePerl(Vector(Instr.PushScalar(42)), "print_scalar")
       code.should(include("PushScalar"))
       code.should(include("42"))
 
-    it("AddScalar → JSON に \"AddScalar\" が含まれる"):
+    it("AddScalar → JSON should contain \"AddScalar\""):
       val code = PerlBridge.generatePerl(
         Vector(Instr.PushScalar(3), Instr.PushScalar(4), Instr.AddScalar),
         "print_scalar"
@@ -120,7 +121,7 @@ class PerlBridgeSpec extends AnyFunSpec with Matchers:
       code.should(include("3"))
       code.should(include("4"))
 
-    it("PushVec3 + DotVec3 → JSON に対応キーが含まれる"):
+    it("PushVec3 + DotVec3 → JSON should contain corresponding keys"):
       val prog = Vector(Instr.PushVec3(1, 2, 3), Instr.PushVec3(4, 5, 6), Instr.DotVec3)
       val typedResult = ProgramLifter.liftTyped(prog)
         .getOrElse(ProgramLifter.ScalarTyped(TypedExpr.TConstScalar(0)))
@@ -134,17 +135,17 @@ class PerlBridgeSpec extends AnyFunSpec with Matchers:
       code.should(include("2"))
       code.should(include("3"))
 
-    it("printMethod が末尾に現れる"):
+    it("printMethod should appear at the end"):
       val code = PerlBridge.generatePerl(Vector(Instr.PushScalar(1)), "print_scalar")
       code.should(include("print_scalar"))
 
-    it("use strict / use warnings / FindBin が含まれる"):
+    it("include use strict / use warnings / FindBin"):
       val code = PerlBridge.generatePerl(Vector(Instr.PushScalar(1)), "print_scalar")
       code.should(include("use strict"))
       code.should(include("use warnings"))
       code.should(include("FindBin"))
 
-  // ── §4  TypedParser typeclass — T に応じた parse ─────────────────────────
+  // ── §4  TypedParser typeclass — Parse based on T ─────────────────────────────
 
   describe("TypedParser typeclass"):
 
@@ -161,27 +162,27 @@ class PerlBridgeSpec extends AnyFunSpec with Matchers:
         Right(Vec3Value(1, 2, 3))
       )
 
-    it("Vec3: '1 2' (不足) → Left"):
+    it("Vec3: '1 2' (insufficient values) → Left"):
       summon[TypedParser[Ty.Vec3.type]].parse("1 2").isLeft.shouldBe(true)
 
-    it("parseTypedOutput: ScalarTyped → Scalar パーサーを使用"):
+    it("parseTypedOutput: Use Scalar parser for ScalarTyped"):
       val typed = ScalarTyped(TypedExpr.TConstScalar(0))
       parseTypedOutput("99", typed).shouldBe(Right(ScalarValue(99)))
 
-    it("parseTypedOutput: Vec3Typed → Vec3 パーサーを使用"):
+    it("parseTypedOutput: Use Vec3 parser for Vec3Typed"):
       val typed = Vec3Typed(TypedExpr.TConstVec3(0, 0, 0))
       parseTypedOutput("7 8 9", typed).shouldBe(Right(Vec3Value(7, 8, 9)))
 
-    it("perlPrintFor: ScalarTyped → スカラ用 print 式"):
+    it("perlPrintFor: Scalar print expression for ScalarTyped"):
       val typed = ScalarTyped(TypedExpr.TConstScalar(0))
       perlPrintFor(typed).should(include("$stack[-1]"))
       perlPrintFor(typed).should(not(include("->")))
 
-    it("perlPrintFor: Vec3Typed → arrayref 用 print 式"):
+    it("perlPrintFor: Arrayref print expression for Vec3Typed"):
       val typed = Vec3Typed(TypedExpr.TConstVec3(0, 0, 0))
       perlPrintFor(typed).should(include("->[0]"))
 
-  // ── §5 & §6  Integration (RUN_PERL_CROSSCHECK=1 が必要) ─────────────────
+  // ── §5 & §6  Integration (requires RUN_PERL_CROSSCHECK=1) ─────────────────
 
   private val PerlEnv = "RUN_PERL_CROSSCHECK"
 
@@ -203,7 +204,7 @@ class PerlBridgeSpec extends AnyFunSpec with Matchers:
       val prog = Vector(Instr.PushScalar(3), Instr.PushScalar(4), Instr.MulScalar)
       PerlBridge.runViaPerl(prog).unsafeRunSync().shouldBe(Right(ScalarValue(12)))
 
-    it("(2*3) + (4*5) = 26  (ネスト Scalar)"):
+    it("(2*3) + (4*5) = 26  (nested scalars)"):
       ensurePerl()
       val prog = Vector(
         Instr.PushScalar(2), Instr.PushScalar(3), Instr.MulScalar,
@@ -232,14 +233,14 @@ class PerlBridgeSpec extends AnyFunSpec with Matchers:
 
   describe("PerlBridge.crossCheck (integration, requires Strawberry Perl)"):
 
-    it("Scalar: crossCheck == Scala 評価結果"):
+    it("Scalar: crossCheck matches Scala evaluation"):
       ensurePerl()
       val prog = Vector(Instr.PushScalar(6), Instr.PushScalar(7), Instr.MulScalar)
       val crossResult = PerlBridge.crossCheck(prog).unsafeRunSync()
       val scalaResult = ProgramEval.exec(prog)
       crossResult.shouldBe(scalaResult)
 
-    it("Vec3 Dot: crossCheck == Scala 評価結果"):
+    it("Vec3 Dot: crossCheck matches Scala evaluation"):
       ensurePerl()
       val prog = Vector(
         Instr.PushVec3(1, 2, 3),
@@ -250,13 +251,13 @@ class PerlBridgeSpec extends AnyFunSpec with Matchers:
       val scalaResult = ProgramEval.exec(prog)
       crossResult.shouldBe(scalaResult)
 
-    it("BatchJob.dhall の frobenius-compile ステップ: 12 * 1 = 12"):
+    it("BatchJob.dhall frobenius-compile step: 12 * 1 = 12"):
       ensurePerl()
       val prog = Vector(Instr.PushScalar(12), Instr.PushScalar(1), Instr.MulScalar)
       val crossResult = PerlBridge.crossCheck(prog).unsafeRunSync()
       crossResult.shouldBe(Right(ScalarValue(12)))
 
-    it("BatchJob.dhall の padic-lower ステップ: (2,4,0)·(1,0,8) = 2"):
+    it("BatchJob.dhall padic-lower step: (2,4,0)·(1,0,8) = 2"):
       ensurePerl()
       val prog = Vector(
         Instr.PushVec3(2, 4, 0),
