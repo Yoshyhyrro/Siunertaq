@@ -1,10 +1,12 @@
 package io.siunertaq.batch
 
 import cats.effect.IO
-import io.siunertaq.expr.{Instr, Program, ProgramEval, Value}
+import io.siunertaq.expr.{Program, ProgramEval, Value}
 import io.siunertaq.expr.ProgramLifter
 
-import java.nio.file.{Files, Paths}
+import java.nio.charset.StandardCharsets
+import java.nio.file.{Files, Paths, StandardCopyOption}
+import java.util.Comparator
 
 /** Perl (Strawberry / Ubuntu system perl) によるスタックマシン相互検証。
  *
@@ -13,6 +15,21 @@ import java.nio.file.{Files, Paths}
  *    Linux 等 → /usr/bin/perl → /usr/local/bin/perl → PATH の perl
  *
  *  活性化条件: 環境変数 RUN_PERL_CROSSCHECK=1 が設定されていること。
+ *
+ *  中間形式 JSON (Program.toJson):
+ *    Scala Program → JSON → Siunertaq::StackMachine->execute_json (Perl)
+ *    同じ JSON が ClassASTBridge (.class → JSON) および
+ *    ForthRegistrar.registerStep (PostgreSQL JSONB) と共通の中間表現。
+ *
+ *  スクリプト構成:
+ *    $tmpDir/
+ *      $label.pl              ← Program.toJson を execute_json に渡す薄いグルー
+ *      Siunertaq/
+ *        StackMachine.pm      ← classpath リソースから展開 (JSON::PP で実装)
+ *
+ *  生成スクリプトの永続化 (CI artifact 収集用):
+ *    PERL_SCRIPT_SAVE_DIR が設定されていれば .pl と Siunertaq/StackMachine.pm を
+ *    保存する。ci-out/perl-scripts/ を指定することで .class と並んで artifact に収まる。
  *
  *  maybeCheckIO 戻り値セマンティクス:
  *    Right(v)                     → Scala と Perl が一致、v は共通値
@@ -58,63 +75,87 @@ object PerlBridge:
         .find(p => Files.isExecutable(Paths.get(p)))
         .orElse(findInPath("perl"))
 
-  // ─── Program → Perl スクリプト生成 ────────────────────────────────────────
-  //
-  //  スタックマシン命令を等価な Perl コードに変換する。
-  //    Scalar: @stack に整数をプッシュ
-  //    Vec3  : @stack に arrayref [x, y, z] をプッシュ
-  //
-  //  注: Perl の @stack[-1] = TOS (top of stack)
-  //      pop @stack = pop — Scala の ArrayStack.pop と同じ LIFO 順序。
-  private def toPerlScript(program: Program, printExpr: String): String =
-    val sb = new StringBuilder(
-      "#!/usr/bin/perl\nuse strict;\nuse warnings;\nmy @stack;\n"
-    )
-    program.foreach:
-      case Instr.PushScalar(n) =>
-        sb ++= s"push @stack, $n;\n"
+  // ─── StackMachine.pm classpath リソース ──────────────────────────────────
+  //  batch-bridge JAR の /perl/Siunertaq/StackMachine.pm から読み込む。
+  //  初回アクセス時のみロード (lazy + スレッドセーフ)。
+  private lazy val stackMachinePm: String =
+    val path = "/perl/Siunertaq/StackMachine.pm"
+    Option(getClass.getResourceAsStream(path))
+      .map { stream =>
+        try String(stream.readAllBytes(), StandardCharsets.UTF_8)
+        finally stream.close()
+      }
+      .getOrElse(throw new java.io.FileNotFoundException(
+        s"Classpath resource not found: $path — " +
+        "StackMachine.pm は batch-bridge/src/main/resources/perl/Siunertaq/ に置いてください"
+      ))
 
-      case Instr.PushVec3(x, y, z) =>
-        sb ++= s"push @stack, [$x, $y, $z];\n"
-
-      case Instr.AddScalar =>
-        // pop 順: r = top, l = next (Lowering の push 順と逆)
-        sb ++= "{ my $r=pop @stack; my $l=pop @stack; push @stack, $l+$r; }\n"
-
-      case Instr.AddVec3 =>
-        sb ++= "{ my $r=pop @stack; my $l=pop @stack; " +
-               "push @stack, [$l->[0]+$r->[0],$l->[1]+$r->[1],$l->[2]+$r->[2]]; }\n"
-
-      case Instr.MulScalar =>
-        sb ++= "{ my $r=pop @stack; my $l=pop @stack; push @stack, $l*$r; }\n"
-
-      case Instr.DotVec3 =>
-        sb ++= "{ my $r=pop @stack; my $l=pop @stack; " +
-               "push @stack, $l->[0]*$r->[0]+$l->[1]*$r->[1]+$l->[2]*$r->[2]; }\n"
-
-    sb ++= printExpr
-    sb += '\n'
-    sb.toString
+  // ─── Program → 薄いグルー .pl ──────────────────────────────────────────────
+  //  ロジックは Siunertaq::StackMachine.execute_json (Perl 側) が持つ。
+  //  printMethod: "print_scalar" | "print_vec3"
+  private def toPerlScript(program: Program, printMethod: String): String =
+    val json = Program.toJson(program).noSpaces
+    s"""#!/usr/bin/perl
+       |use strict;
+       |use warnings;
+       |use FindBin;
+       |use lib "$$FindBin::Bin";
+       |use Siunertaq::StackMachine;
+       |my $$sm = Siunertaq::StackMachine->new();
+       |$$sm->execute_json('${json.replace("'", "\\'")}');
+       |$$sm->$printMethod();
+       |""".stripMargin
 
   // ─── Perl サブプロセス実行 ─────────────────────────────────────────────────
   //
   //  IO.blocking を使用することで Spring Batch の管理スレッドをブロックしない。
-  //  一時ファイルを作成して perl に渡す (stdin パイプではなくファイル渡しにする
-  //  のは Strawberry Perl の stdin バッファリング問題を回避するため)。
-  def executePerl(script: String, perl: String): IO[Either[String, String]] =
+  //
+  //  実行ディレクトリ構成:
+  //    $tmpDir/
+  //      $label.pl              ← .pl スクリプト (FindBin::Bin = $tmpDir)
+  //      Siunertaq/
+  //        StackMachine.pm      ← classpath から展開; use lib で参照
+  //
+  //  PERL_SCRIPT_SAVE_DIR が設定されている場合は同じ構成でコピーを保存。
+  def executePerl(script: String, perl: String, label: String): IO[Either[String, String]] =
     IO.blocking:
-      val tmp = Files.createTempFile("siunertaq-perl-", ".pl")
+      val tmpDir    = Files.createTempDirectory("siunertaq-perl-")
+      val scriptFile = tmpDir.resolve(s"$label.pl")
+      val pmDir      = tmpDir.resolve("Siunertaq")
       try
-        Files.writeString(tmp, script)
-        val proc = new ProcessBuilder(perl, tmp.toString)
-          .redirectErrorStream(true)   // stderr を stdout にマージ
+        // .pl を書き出す
+        Files.writeString(scriptFile, script)
+
+        // Siunertaq/StackMachine.pm を classpath から展開
+        Files.createDirectories(pmDir)
+        Files.writeString(pmDir.resolve("StackMachine.pm"), stackMachinePm)
+
+        // CI artifact 収集用: PERL_SCRIPT_SAVE_DIR に .pl と .pm を永続保存
+        sys.env.get("PERL_SCRIPT_SAVE_DIR").foreach { saveDir =>
+          val dest   = Paths.get(saveDir)
+          val destPm = dest.resolve("Siunertaq")
+          Files.createDirectories(dest)
+          Files.createDirectories(destPm)
+          Files.copy(scriptFile,
+            dest.resolve(s"$label.pl"), StandardCopyOption.REPLACE_EXISTING)
+          Files.copy(pmDir.resolve("StackMachine.pm"),
+            destPm.resolve("StackMachine.pm"), StandardCopyOption.REPLACE_EXISTING)
+        }
+
+        // perl を tmpDir 配下で起動 ($FindBin::Bin = tmpDir)
+        val proc = new ProcessBuilder(perl, scriptFile.toString)
+          .directory(tmpDir.toFile)
+          .redirectErrorStream(true)
           .start()
         val out  = String(proc.getInputStream.readAllBytes()).trim
         val exit = proc.waitFor()
         if exit == 0 then Right(out)
         else Left(s"perl exited $exit: $out")
       finally
-        Files.deleteIfExists(tmp): Unit
+        // tmpDir を再帰削除 (最深部から順に削除)
+        Files.walk(tmpDir)
+          .sorted(Comparator.reverseOrder())
+          .forEach(p => Files.deleteIfExists(p): Unit)
 
   // ─── Scala/Perl 相互検証 エントリポイント ────────────────────────────────
   def maybeCheckIO(program: Program, stepName: String): IO[Either[String, Value]] =
@@ -132,8 +173,11 @@ object PerlBridge:
             case Left(err) =>
               IO.pure(Left(s"[PerlBridge] SKIP: liftTyped failed: $err"))
             case Right(typedResult) =>
-              val script = toPerlScript(program, ProgramLifter.perlPrintFor(typedResult))
-              executePerl(script, perl).map:
+              val printMethod = typedResult match
+                case ProgramLifter.ScalarTyped(_) => "print_scalar"
+                case ProgramLifter.Vec3Typed(_)   => "print_vec3"
+              val script = toPerlScript(program, printMethod)
+              executePerl(script, perl, stepName).map:
                 case Left(execErr) =>
                   Left(execErr)   // Perl 実行エラー → WARN (SKIP プレフィックスなし)
 
