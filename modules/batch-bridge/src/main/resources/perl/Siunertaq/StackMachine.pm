@@ -57,9 +57,9 @@ sub execute_json {
     return $self;
 }
 
-# ─── 出力 (TypedParser 相当) ──────────────────────────────────────────────────
-#  print_scalar / print_vec3 は PerlBridge.toPerlScript が呼び出す。
-#  out の差し替えにより PerlBridgeSpec からバッファで検証できる。
+# ─── Output ───────────────────────────────────────────────────────────────
+#  print_scalar / print_vec3 throw the top of the stack to the output filehandle.
+#  out is set in the constructor (default: STDOUT).
 
 sub print_scalar {
     my $self = shift;
@@ -72,8 +72,8 @@ sub print_vec3 {
     print { $self->{out} } $v->[0], " ", $v->[1], " ", $v->[2], "\n";
 }
 
-# ─── 内部演算 ─────────────────────────────────────────────────────────────────
-#  pop 順: r = top, l = next — Lowering.lowerUnchecked の push 順と逆
+# ─── Internal Operations ─────────────────────────────────────────────────────
+#  pop order: r = top, l = next — opposite of Lowering.lowerUnchecked push order
 
 sub _add_scalar {
     my $self = shift;
