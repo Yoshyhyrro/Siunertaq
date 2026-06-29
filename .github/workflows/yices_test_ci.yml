@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - example/feature/jvm-mzv_postgres_to_ClickHouse
+      - feature/ClickHouse_ruby
     paths:
       - build.sbt
       - modules/core/**
@@ -155,6 +155,9 @@ jobs:
                 mkdir -p "$(dirname "$dest")"
                 cp "$f" "$dest"
               done
+            mkdir -p ci-out/perl
+            find "$pm_src" \( -name "*.pm" -o -name "*.pl" \) \
+              -print0 | xargs -0 -I{} cp {} ci-out/perl/
           fi
 
           # ── ClickHouse schema SQL ──────────────────────────────────────────
