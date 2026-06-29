@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - feature/ClickHouse_ruby
+      - release/v0.1.0.beta.3
     paths:
       - build.sbt
       - modules/core/**
