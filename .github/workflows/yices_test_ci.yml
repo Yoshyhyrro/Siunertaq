@@ -155,9 +155,6 @@ jobs:
                 mkdir -p "$(dirname "$dest")"
                 cp "$f" "$dest"
               done
-            mkdir -p ci-out/perl
-            find "$pm_src" \( -name "*.pm" -o -name "*.pl" \) \
-              -print0 | xargs -0 -I{} cp {} ci-out/perl/
           fi
 
           # ── ClickHouse schema SQL ──────────────────────────────────────────
