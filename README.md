@@ -24,13 +24,15 @@ The repository combines:
 | `z3-bridge` | Z3 JNI Banach constraint solver | `BanachConstraintSolver` |
 | `yices-bridge` | Yices 2 SMT cross-check lane + smoke tests | `YicesThresholdSolver`, `YicesSmtLib` |
 | `dhall-bridge` | Dhall → JSON → Scala batch job decoder | `BatchJobDef`, `CondEvaluator`, `DhallBatchRegistry` |
-| `batch-bridge` | JCL/JES2-style Pekko + Spring Batch orchestration | `JobSupervisorActor`, `StepExecutorActor`, `StackMachineTasklet` |
+| `batch-bridge` | JCL/JES2-style Pekko + Spring Batch orchestration | `JobSupervisorActor`, `StepExecutorActor`, `StackMachineTasklet`, `PerlBridge` |
 | `petersen-mzv` | MZV depth-3 reduction on the Petersen phase graph | `PetersenFluidMachine`, `ImaginaryPopperActor`, `MZVMachineBean` |
 | `mlir-bridge` | *(planned)* MLIR / Affine Dialect integration | — |
 
 ---
 
-## Mathematical Foundations: MZV and the `petersen-mzv` Module
+## Example — `petersen-mzv`: Extreme Numeric Type on the Stack Machine
+
+`examples/petersen-mzv` exercises the stack machine with the most constrained numeric type in the codebase: **Multiple Zeta Values (MZVs)** traversing the Petersen graph under seven SMT-verified invariants (P1–P7). It is intentionally the hardest computation the system is expected to handle — if the stack machine, fault isolation, and PostgreSQL audit trail hold up here, they hold up everywhere.
 
 ### Multiple Zeta Values — Furusho's Framework
 
@@ -158,6 +160,17 @@ The machine contains exactly two structurally distinct `???` sites, each with it
 
 ## The idea
 
+Siunertaq builds a **language-agnostic stack machine IR** that evaluates the same `Program` in multiple runtime environments and audits every result through a two-tier storage layer:
+
+| Layer | Technology | Role |
+|---|---|---|
+| Audit | PostgreSQL | Immutable step-result log; every `ImaginaryPopperActor` regularization event is recorded |
+| Analytics | ClickHouse | High-throughput CDC mirror; materialised views for opcode frequency, dead-code, MZV weight distribution |
+
+Cross-language correctness is verified by `PerlBridge` (`RUN_PERL_CROSSCHECK=1`): Scala JVM and Perl evaluate the same `Program` independently, and any divergence immediately sets `ExitStatus.FAILED`. The same pattern extends to further language backends.
+
+---
+
 Build systems are directed graphs. So are Banach spaces with norm-compatible maps. Siunertaq exploits this overlap by modelling build dependencies as arrows in a *BSD quiver* — a directed graph whose vertices carry norm bounds and whose arrows are typed by their role:
 
 - **Frobenius arrows** (`FVRole.Frobenius`) point in the *norm-increasing* direction: forward dependencies, compilation steps, things that must happen.
@@ -179,132 +192,6 @@ The goal is to make ill-ordered builds *unrepresentable* rather than merely *ill
 | `AffineDual` | $\sqrt{A_{11}^\vee}$ | Affine dual; Frobenius target |
 | `Padic` | $\mathcal{O}^p$ | p-adic completion; Hida eigenvalue ratio |
 | `Selmer` | $\Sigma_I$ | Selmer group; Verschiebung target |
-
-### Phantom extension: complex Berkovich weights
-
-The discrete quiver structure is lifted to the complex plane through a chain of three types:
-
-```
-GolayWeight          — five orbit classes {W0, W8, W12, W16, W24}
-  ↓ octadHeight       — linear Berkovich height h ∈ [0, 8]  (h + h̄ = 8)
-Carabiner            — (weight: GolayWeight, phase: ℤ/4ℤ)
-  ↓ fromCarabiner     — embed at im = 0, carry phase
-PhantomCarabiner     — (weight: ComplexWeight, phase: Int)
-```
-
-`ComplexWeight` is an opaque type over `(Double, Double)`, hiding the pair behind an
-algebra-preserving interface so callers cannot construct malformed weights or mutate
-them outside the declared operations:
-
-```scala
-opaque type ComplexWeight = (Double, Double)
-// re = Berkovich height  (continuous analogue of GolayWeight.octadHeight)
-// im = obstruction residual degree  (deviation from the real axis)
-```
-
-Three core operations on `PhantomCarabiner` correspond directly to number-theoretic constructions:
-
-| Operation | Formula | Role |
-|---|---|---|
-| `complement` | $w \mapsto 6 - \overline{w}$ | Self-duality across critical midpoint |
-| `verschiebung` | $w \mapsto w / 2$ | Witt-vector operator $V$ for $p = 2$ |
-| `thetaLink` | $w \mapsto -w \cdot i$ | IUT $\Theta$-link; $-\pi/2$ rotation; $\mathbb{Z}_4$ holonomy |
-
-Two gauge-invariant observables are exposed as read-only projections:
-
-| Observable | Formula | Property |
-|---|---|---|
-| `berryPhaseAngle` | $\arg(w) \in (-\pi, \pi]$ | Advances by $-\pi/2$ per `thetaLink`; unchanged by `verschiebung` |
-| `weightNormSq` | $\lvert w \rvert^2 = \mathrm{re}^2 + \mathrm{im}^2$ | Preserved by `thetaLink`; halved by `verschiebung²` |
-
-`berryPhaseAngle` advances by exactly $-\pi/2$ under each `thetaLink` application and is
-unchanged by `verschiebung` (for `weight ≠ 0`), making it a natural invariant for
-tracking accumulated phase around a quiver path.
-
-Mutable state is encapsulated behind a second opaque type:
-
-```scala
-opaque type PhantomCarabinerRef = Ref[IO, PhantomCarabiner]
-// exposed: applyVerschiebung, applyThetaLink, applyComplement, berryPhaseAngle, …
-// hidden:  the raw Ref; no arbitrary mutation possible from outside carabiner/
-```
-
-### Golay route: the canonical five-step path
-
-`golayRoute` is the unique self-dual ascending path through all five Golay weight classes.
-Its structure encodes several simultaneous symmetries:
-
-| Step | Weight | Orbit Size | Berkovich Height $h$ | Space Tag | Complement $h' = 8 - h$ |
-|---|---|---|---|---|---|
-| 0 | W0 | 1 | $0$ | Affine | $8$ (W24) |
-| 1 | W8 | 759 | $8/3$ | Banach | $16/3$ (W16) |
-| 2 | W12 | 2576 | $4$ | Hybrid | $4$ (W12, self-dual) |
-| 3 | W16 | 759 | $16/3$ | Banach | $8/3$ (W8) |
-| 4 | W24 | 1 | $8$ | Affine | $0$ (W0) |
-
-$$\text{totalPositions} = 1 + 759 + 2576 + 759 + 1 = 4096 = 2^{12}$$
-
-**Fan equation** (complement symmetry): $h[i] + h[4-i] = 8$ for all $i$.
-
-The Mathieu group $M_{24}$ conjugacy class 8A has exactly 759 elements — matching
-`GolayWeight.W8.orbitSize` — which is how $M_{24}$ group theory enters the route structure.
-
-### Spectral bridge: Yang-Baxter and spiral rotations
-
-`YangBaxterBanach` provides the Satake spectral parameter, bridging the discrete Golay
-lattice to the continuous Berkovich tree:
-
-```scala
-// SpiralRotation(angle θ, scalingFactor λ ∈ ℂ)
-// spiralToSpectralParam: u = λ · exp(iθ)  (Satake torus coordinate)
-PhantomCarabiner.fromSpiralRotation(s)   // weight = spectral parameter
-```
-
-The spectral R-matrix $R(u)$ gives the rational $GL_2$ Yang-Baxter operator:
-
-$$R(u)\bigl((i_1, i_2),\,(j_1, j_2)\bigr) = u\,\delta_{i_1 j_1}\delta_{i_2 j_2} + \delta_{i_1 j_2}\delta_{i_2 j_1}$$
-
-### Height functions: two scales, two purposes
-
-`MachineConstants` distinguishes two height functions that are frequently conflated:
-
-| Function | Formula | Scale | Purpose |
-|---|---|---|---|
-| `galoisHeight(n)` | $8 \cdot \log(n) / \log(24)$ | Logarithmic | GIT semistability mask |
-| `octadHeight(w)` | $w / 3$ | Linear | Berkovich tree position |
-
-Concrete values:
-
-| Weight | `galoisHeight` | `octadHeight` |
-|---|---|---|
-| $n = 8$ | $\approx 5.23$ | $8/3$ |
-| $n = 12$ | $\approx 6.59$ | $4$ |
-| $n = 24$ | $8.00$ | $8$ |
-
-The logarithmic function encodes a **GIT stability condition**: orbits whose
-representation dimension grows faster than $\log$ are filtered out, exactly as unstable
-SIMT threads are predicated off in a warp. `machineEpsilonReal = 2^{-52}` (IEEE 754)
-and `valuationDepth = 52` (mantissa bits) ground the tower in hardware arithmetic.
-
-### SIMD ↔ SIMT correspondence
-
-The algebraic structure maps onto GPU parallelism at two levels:
-
-| GPU concept | Scala / mathematics | Grounding |
-|---|---|---|
-| SIMD lane | `GolayWeight.orbitSize` (W8 = 759 lanes) | Frobenius acts on all 759 octads simultaneously |
-| SIMT thread register | `Ref[IO, State]` per vertex | Per-thread mutable state, atomically updated |
-| Warp instruction | `BSDArrow[S, T]` morphism | Same Frobenius/Verschiebung instruction, different data |
-| Warp execution | `IO.parTraverse` over arrows | All fibers run concurrently under Cats Effect |
-| Thread divergence | `thetaLink` (im ≠ 0) | Phase deviation from the real axis |
-| Thread mask | `galoisHeight` semistability | Unstable orbits GIT-filtered before SMT encoding |
-| IEEE 754 ε | `machineEpsilonReal` | Floor for `qAdicEquivalent`; p-adic tower bottoms at hardware |
-| Warp size | `arikiKoikeN = 8` | Natural braid-strand grouping in AK algebra |
-| Mantissa depth | `valuationDepth = 52` | p-adic valuation truncates at the FP representation |
-
-This is the motivation for `Cats Ref` over a simpler mutable variable: `Ref[IO, T]`
-is lock-free and referentially transparent, giving the same atomicity guarantee as a
-GPU register file without the shared-memory hazards of SIMT divergence.
 
 ### Type-safe braid pop on the JVM
 
@@ -396,6 +283,7 @@ The two bridges are deliberately kept at arm's length: `z3-bridge` links against
 - `yices-smt2` on `$PATH` for Yices smoke tests and CI
 - `dhall-to-json` on `$PATH` for `dhall-bridge` and `batch-bridge` evaluation
 - `z3` on `$PATH` (or via `Z3_PATH`) for optional MZV SMT smoke tests (`RUN_MZV_SMT_SMOKE=1`)
+- `perl` on `$PATH` (optional) for `PerlBridge` Scala/Perl differential testing (`RUN_PERL_CROSSCHECK=1`); Ubuntu: `sudo apt install perl`, Windows: [Strawberry Perl](https://strawberryperl.com/)
 
 ## Build
 
@@ -449,7 +337,7 @@ modules/
     src/main/scala/io/siunertaq/
       dhall/          — DhallEffectRegistry: Dhall → IO effect registration
       batch/          — BatchJobDef, DhallBatchRegistry, CondEvaluator
-  batch-bridge/       — Spring Batch + Pekko JES2; StackMachineTasklet, StepExecutorActor, JobSupervisorActor
+  batch-bridge/       — Spring Batch + Pekko JES2; StackMachineTasklet, StepExecutorActor, JobSupervisorActor, PerlBridge (OS-aware Perl cross-validation)
   mlir-bridge/        — planned MLIR / Affine Dialect integration
 examples/
   petersen-mzv/
