@@ -5,7 +5,7 @@ import org.apache.pekko.actor.ActorRef
 // ─── JCL from Siunertaq Batch DSL ───────────────────────────────────────────────
 
 /** that is jcl whith jobcard and exec card, but not jcl syntax */
-final case class RunJob(jobDef: JobDefinition)
+final case class RunJob(jobDef: JobDef)
 
 /** JCL EXEC card equivalent: RunJob is sent to JobSupervisorActor */
 final case class RunStep(
