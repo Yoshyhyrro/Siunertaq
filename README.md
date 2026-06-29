@@ -360,131 +360,9 @@ examples/
 
 ## Release Notes
 
-### v0.1.0-beta.1 — `batchBridge` Fix, `PerlBridge`, and `petersenMzv` Repair
-
-Resolves all compilation errors in `batchBridge` (11 errors → 0) and `petersenMzv` (1 error → 0), introduces OS-aware Perl cross-validation, and eliminates all 8 Scala 3.8 warnings in `batchBridge`.
-
-**Bug fixes:**
-
-| Module | File | Error | Fix |
-|---|---|---|---|
-| `batchBridge` | `SiunertaqBatchApp.scala` | E008: `IO.bracket` not a member of `object cats.effect.IO` | Instance method `IO(…).bracket(…)` — cats-effect 3.x |
-| `batchBridge` | `StackMachineTasklet.scala` | 9 cascade "Not found" errors (`PerlBridge` missing) | Created `PerlBridge.scala` |
-| `batchBridge` | `StepExecutorActor.scala` | Type mismatch + too many arguments on `createJobExecution` | Spring Batch 5 two-arg form `(String, JobParameters)` |
-| `petersenMzv` | `PetersenFluidMachine.scala` | E007: `resolveStack` body inferred as `Unit` | `step(start, triple)` dedented from 8 sp (inside `else`) to 4 sp (after `def step`) |
-
-**New — `PerlBridge`** (153 lines): OS-aware Perl cross-validation of the BSD Quiver stack machine, activated by `RUN_PERL_CROSSCHECK=1`. Detects Strawberry Perl on Windows (`C:\Strawberry\perl\bin\perl.exe`) and system `perl` on Ubuntu/Linux (`/usr/bin/perl`). Transpiles each `Program` to a `@stack`-based Perl script and compares results via GADT dispatch (`ProgramLifter.liftTyped` → `TypedParser[T]`).
-
----
-
-### postgres-bridge Analytics Release — ClickHouse + Mecrisp-Stellaris Forth
-
-Introduces the ClickHouse analytics backend for `postgres-bridge` and a Mecrisp-Stellaris Forth compilation pipeline, bridging JVM bytecode analysis to ARM Cortex-M Forth execution.
-
-```
-[Dhall]  ──type-checked schema──►  [Scala / ASM]
-                                        │
-                  ┌─────────────────────┤
-                  ▼                     ▼
-           [PostgreSQL]           [ClickHouse]
-           (audit)   ──CDC──►  (Ultra-high-speed analyzer)
-                                   ├── bytecode_instructions
-                                   ├── forth_words
-                                   └── mzv_triple_stream
-```
-
-**`clickhouse_schema.sql`** (297 lines):
-
-| Table / View | Engine | Purpose |
-|---|---|---|
-| `bytecode_instructions` | `ReplacingMergeTree` | Per-instruction rows; `LowCardinality` on class/method names; `Array(String)` Mecrisp tokens |
-| `forth_words` | `ReplacingMergeTree` | Compiled Forth word definitions; `body_tokens Array(String)` for n-gram analysis |
-| `mzv_triple_stream` | `MergeTree` | CDC mirror of `mzv_triple_log`; `MATERIALIZED` columns for `mzv_weight` and `pentagon_delta` |
-| `compiled_words_mirror` | `ReplacingMergeTree` | CDC mirror of PostgreSQL `compiled_words` |
-| `dead_forth_words` | VIEW | Words defined but never called (Level 2 dead code) |
-| `hot_trigrams` | VIEW | Most frequent 3-token sequences via `ARRAY JOIN arrayEnumerate` |
-| `stack_depth_distribution` | VIEW | Stack depth histogram across all reachable instructions |
-| `dead_code_by_class` | VIEW | Dead instruction count and percentage per class |
-| `mzv_weight_stats` | VIEW | MZV traversal analytics: weight distribution, δ averages, fixed-point counts |
-| `fixed_point_triples` | VIEW | MZV triples that return to their starting state (P4/SAT analogue at scale) |
-| `opcode_frequency_mv` | `SummingMergeTree` MATERIALIZED VIEW | Incrementally maintained opcode frequency; no separate ETL job needed |
-
-Requires ClickHouse 24.x; set `CLICKHOUSE_HOST` / `CLICKHOUSE_PORT` or see `BUILD_NOTES.md` for the Docker one-liner.
-
----
-
-### v0.1.0-alpha.2 — True Green Build
-
-This release focuses on solidifying the build pipeline, achieving full CI compliance (the "True Green" build), and resolving complex Scala 2 / Scala 3 interoperability bottlenecks within the `petersen-mzv` module.
-
-#### Scala 3 Compiler & Type Safety
-
-| Fix | Location | Detail |
-|---|---|---|
-| Strict equality bypasses | `PetersenFluidMachine` | Resolved `-language:strictEquality` errors in Scala 3.8. Replaced direct `==` on `Class[?]` / `Vertex` with explicit `.getClass.getName !=` and `.equals()` for dynamic graph traversal boundaries |
-| SMT-LIB AST interoperability | `PetersenSMTLib` | Fixed Scala 2/3 type mismatch: `QF_LIA` case object failed to upcast to `Logic` trait. Applied explicit `.asInstanceOf[Logic]` cast |
-| Domain model accessors | `MZVMachineBean` | Updated getter references (`getS1` → `s1`, etc.) to align with Scala 3 property accessors, ensuring interoperability with Spring EL and Java-based enterprise components |
-
-#### Build Pipeline & Dependency Management
-
-| Fix | Detail |
-|---|---|
-| `scala-smtlib` version resolution | Fixed a critical artifact duplication error (`_2.13_2.13`) that broke CI. Pinned to upstream staging commit `0.2.1-42-gc68dbaa` with correct `cross CrossVersion.for3Use2_13` semantics |
-| Spring Framework integration | Injected missing `spring-context` (`6.1.14`) into the `petersen-mzv` build definition, restoring `@Service` and `@Autowired` bean wiring for the JVM MZV execution engine |
-
-> **Note:** With these changes, the entire ecosystem — including the `postgres-bridge`, MZV boundary evaluations, and SMT verifications — now successfully compiles and passes automated CI testing without silent omissions.
-
----
-
-### v0.1.0-alpha.1 — `postgres-bridge` and MZV/BSD Quiver Bridge
-
-This alpha release introduces the `postgres-bridge` module, expanding the Siunertaq ecosystem to support database-backed auditing and a pure-SQL Forth compilation engine. The core architectural addition is the mapping of the Petersen graph (MZV vertices) onto the BSD quiver, bridging JVM bytecode execution with JCL-inspired Spring Batch steps.
-
-#### PostgreSQL Bridge (`postgres-bridge`)
-
-| Feature | Description |
-|---|---|
-| `siunertaq_forth` | Pure-SQL BSD Quiver Forth compilation engine targeting JVM/Spring Batch step programs |
-| `siunertaq_petersen` | Maps Petersen graph vertices (`Outer`/`Inner`) to MZV parts (`Real`/`Imaginary`) and bounds them to BSD quiver vertices (`Leech`, `AffineDual`, `Padic`, `Selmer`) |
-| `mzv_triple_log` | Audit log tracking divergent triples and regularization states (`register_imaginary_pop`) — all imaginary phase shifts immutably recorded |
-
-**Petersen → BSD quiver vertex mapping:**
-
-| Petersen Vertex | MZV Part | BSD Quiver Vertex |
-|---|---|---|
-| `Outer(i)` (even-depth) | Real | `Leech` / `AffineDual` |
-| `Inner(0)` (odd-depth, pole) | Imaginary (ABEND boundary) | `Selmer` |
-| `Inner(i≥1)` (odd-depth, recovery) | Imaginary (recovery path) | `Padic` |
-
-#### Type-Safe Connection State & Supervision
-
-| Component | Description |
-|---|---|
-| `ForthConnMachine` | `cats.effect.Ref`-backed state machine (`Idle`, `Busy`, `Closed`) for JDBC connections. Guarantees connection safety under SQL exceptions; exposes a gauge-invariant `phase` diagnostic view |
-| `ForthRegistrarActor` | Integrates the database layer into the Pekko supervision tree. Employs JES2-inspired fault isolation via `OneForOneStrategy`, recovering from `SQLException` and `IOException` without cascading failures |
-
-#### Stack Machine & Bytecode Compilation
-
-| Component | Description |
-|---|---|
-| `ClassASTBridge` | Safely extracts arithmetic opcodes (`BIPUSH`, `IADD`, `IMUL`) directly from compiled `.class` bytecode via ASM, translating them into Dhall-compatible `StackInstr` JSON arrays. Guarantees isomorphism between "executed JVM code" and "recorded Forth code" |
-
-#### Dhall & Scala Symmetry
-
-`PetersenMZV.dhall` and `PetersenVertexBSD.scala` establish a guaranteed bidirectional mapping:
-
-| Petersen Vertex | Dhall/Scala `cond` | JCL Analog |
-|---|---|---|
-| `Outer(i)` (even-depth, Real) | `None` / standard execution | Normal step |
-| `Inner(0)` (odd-depth, pole) | `COND=ONLY` (ABEND recovery boundary) | Recovery step |
-| `Inner(i≥1)` (odd-depth, recovery) | `COND=(0,NE)` | Conditional recovery |
-
-#### Dependencies Bumped
-
-- `org.postgresql` → `42.7.3`
-- Introduced `doobie-core` and `skunk-core` (`1.0.0-RC2`) for future pure-functional DB integrations.
-
----
+See the [GitHub Releases](../../releases) page for the full changelog.
+The most recent release is **[v0.1.0-beta.3](../../releases/tag/v0.1.0-beta.3)** —
+shared StackInstr JSON, `Siunertaq::StackMachine.pm`, and full `PerlBridgeSpec` green (32/32).
 
 ## Current status
 
@@ -492,22 +370,18 @@ This alpha release introduces the `postgres-bridge` module, expanding the Siuner
 - Yices and Z3 verification lanes separated and independently runnable.
 - GitHub Actions CI validates the Yices path on `ubuntu-latest` with the real solver binary.
 - Codebase prepared for SPARK/Ada proof packages: `lower` and S-expression round-trips already have ScalaTest specs that serve as ground-truth witnesses.
-- `batch-bridge` compiles cleanly under Scala 3.8.3 with `-language:strictEquality`: `BatchJob.dhall` → `BatchJobDef` → Spring Batch step execution driven by the BSD Quiver stack machine, with JCL-inspired `CondExpr` execution control and Pekko `OneForOneStrategy` fault isolation. `PerlBridge` provides optional Scala/Perl differential testing (`RUN_PERL_CROSSCHECK=1`) with OS-aware `perl` binary detection (Strawberry Perl on Windows, `/usr/bin/perl` on Ubuntu).
+- `batch-bridge` compiles cleanly under Scala 3.8.3 with `-language:strictEquality`: `BatchJob.dhall` → `BatchJobDef` → Spring Batch step execution driven by the BSD Quiver stack machine, with JCL-inspired `CondExpr` execution control and Pekko `OneForOneStrategy` fault isolation.
+- `PerlBridge` provides opt-in Scala/Perl differential testing (`RUN_PERL_CROSSCHECK=1`). Generated `.pl` scripts delegate all stack-machine logic to `Siunertaq::StackMachine.pm` via `JSON::PP` — the same `{"PushScalar":{"n":5}}` format emitted by `ClassASTBridge` and stored in the PostgreSQL `instructions` column. `PerlBridgeSpec` runs 32 tests green in CI, including a full subprocess integration suite.
+- `Program.toJson` in `core` is the canonical StackInstr JSON format shared by `.class` analysis (`ClassASTBridge`), PostgreSQL JSONB (`ForthRegistrar`), and Perl execution (`Siunertaq::StackMachine->execute_json`).
 - `CondEvaluatorSpec` covers all six `CondOp` variants with boundary values; runs in CI without any external tools.
 - Automated release workflow publishes per-module JARs to GitHub Releases on version tag push.
 - `petersen-mzv` compiles cleanly: `PetersenFluidMachine` implements Furusho's pentagon coherence as a typed Scala 3 Cats Effect pipeline; `ImaginaryPopperActor` handles IKZ-style regularization of divergent triples ($s_1 = 1$); full SMT suite P1–P7 passes on `z3`.
-- `carabiner/` package formalises the Golay lattice (five weight classes, self-dual route,
-  M₂₄ 8A orbit match) and lifts it to a complex Berkovich evaluation layer via `PhantomCarabiner`.
-- `opaque type ComplexWeight` and `opaque type PhantomCarabinerRef` hide implementation details
-  behind algebra-preserving APIs; `berryPhaseAngle` and `weightNormSq` are the only exposed
-  gauge-invariant observables.
-- `MachineConstants` separates the logarithmic `galoisHeight` (GIT semistability mask) from
-  the linear `octadHeight` (Berkovich tree position) and grounds the tower in IEEE 754 via
-  `machineEpsilonReal = 2⁻⁵²` and `valuationDepth = 52`.
-- `YangBaxterBanach` supplies the Satake spectral parameter bridge (`SpiralRotation →
-  spiralToSpectralParam → PhantomCarabiner`) and the rational GL₂ R-matrix.
 - `postgres-bridge`: ClickHouse 24.x analytics backend operational; CDC pipeline (`mzv_triple_stream`, `bytecode_instructions`, `forth_words`) ready for production ingestion.
-- v0.1.0-beta.1: all five active modules (`core`, `z3Bridge`, `yicesBridge`, `batchBridge`, `petersenMzv`) compile cleanly under Scala 3.8.3 with `-language:strictEquality`.
+- `carabiner/` package formalises the Golay lattice (five weight classes, self-dual route, M₂₄ 8A orbit match) and lifts it to a complex Berkovich evaluation layer via `PhantomCarabiner`.
+- `opaque type ComplexWeight` and `opaque type PhantomCarabinerRef` hide implementation details behind algebra-preserving APIs; `berryPhaseAngle` and `weightNormSq` are the only exposed gauge-invariant observables.
+- `MachineConstants` separates the logarithmic `galoisHeight` (GIT semistability mask) from the linear `octadHeight` (Berkovich tree position) and grounds the tower in IEEE 754 via `machineEpsilonReal = 2⁻⁵²` and `valuationDepth = 52`.
+- `YangBaxterBanach` supplies the Satake spectral parameter bridge (`SpiralRotation → spiralToSpectralParam → PhantomCarabiner`) and the rational GL₂ R-matrix.
+- v0.1.0-beta.3: all five active modules (`core`, `z3Bridge`, `yicesBridge`, `batchBridge`, `petersenMzv`) compile cleanly; `PerlBridgeSpec` 32/32 green including Perl subprocess integration.
 
 ## Future work
 
@@ -515,7 +389,7 @@ This alpha release introduces the `postgres-bridge` module, expanding the Siuner
 - Parallel step dispatch in `JobSupervisorActor` for steps sharing the same `priority` value
 - Yices-verified norm thresholds wired directly into `StepExecutorActor` pre-conditions, so a step that would violate a BSD norm bound is rejected before Spring Batch ever runs it
 - `mlir-bridge`: map `BSDArrow` decompositions to MLIR Affine Dialect norm constraints, JIT via LLVM IR
-- Language bridge expansion: extend the `PerlBridge` pattern to **Portable Ruby** (mruby or CRuby `--with-static-stdlib`) as the next cross-validation target, followed by Python and Rust — the stack machine IR is already language-agnostic
+- Language bridge expansion: extend the `PerlBridge` pattern to **Portable Ruby** (mruby or CRuby `--with-static-stdlib`) as the next cross-validation target; unify `PerlBackend` and `RubyBackend` under a `ScriptBackend` trait so `toPerlScript` / `toRubyScript` share one generator
 - ClickHouse: additional materialised views for per-step latency distribution and cross-language divergence tracking (cases where `MISMATCH` was logged)
 - `postgres-bridge`: wire `mzv_triple_log` PostgreSQL audit table directly into the Pekko supervision tree so every `ImaginaryPopperActor` regularization event is immutably recorded (ClickHouse CDC mirror `mzv_triple_stream` is complete; direct actor-tree wiring is pending)
 - `batchBridge` residual warnings: `ActorProtocol.scala` (`ActorRef` unused import), `JobSupervisorActor.scala` (`Terminated(_)` pattern variable), `MZVMachineBean.scala` (`unsafeRunSync`/`unsafeToFuture` → `using`), `PetersenSmtSolver.scala` (`Files.writeString` return discarded)

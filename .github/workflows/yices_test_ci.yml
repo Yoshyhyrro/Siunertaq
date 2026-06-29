@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - feature/ClickHouse_ruby
+      - release/v0.1.0.beta.3
     paths:
       - build.sbt
       - modules/core/**
@@ -148,9 +148,13 @@ jobs:
           pm_src="modules/batch-bridge/src/main/resources"
           if find "$pm_src" \( -name "*.pm" -o -name "*.pl" \) -quit 2>/dev/null \
              | grep -q .; then
-            mkdir -p ci-out/perl
             find "$pm_src" \( -name "*.pm" -o -name "*.pl" \) \
-              -print0 | xargs -0 -I{} cp {} ci-out/perl/
+              -print0 | while IFS= read -r -d '' f; do
+                rel="${f#$pm_src/}"          # perl/Siunertaq/StackMachine.pm
+                dest="ci-out/perl/$rel"
+                mkdir -p "$(dirname "$dest")"
+                cp "$f" "$dest"
+              done
           fi
 
           # ── ClickHouse schema SQL ──────────────────────────────────────────

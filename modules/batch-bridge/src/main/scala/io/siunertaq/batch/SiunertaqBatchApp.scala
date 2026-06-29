@@ -13,7 +13,7 @@ import scala.concurrent.duration.*
 
 object SiunertaqBatchApp extends IOApp.Simple:
 
-  // ─── Spring Batch インフラ (in-memory H2) ───────────────────────────────
+  // ─── Spring Batch Infrastructure ───────────────────────────────────────────────
   private def buildInfra =
     val ds = EmbeddedDatabaseBuilder()
       .setType(EmbeddedDatabaseType.H2)
@@ -26,14 +26,14 @@ object SiunertaqBatchApp extends IOApp.Simple:
     factory.afterPropertiesSet()
     (factory.getObject, txMgr)
 
-  // IO.bracket は cats-effect 3.x では静的メソッドとして存在しない。
-  // IO[A]#bracket(use)(release) — インスタンスメソッドを使う。
+  // IO.bracket is not available as a static method in cats-effect 3.x.
+  // Use the instance method IO[A]#bracket(use)(release) instead.
   override def run: IO[Unit] =
     IO(ActorSystem("siunertaq-batch")).bracket(runBatch)(sys => IO(sys.terminate()).void)
 
   private def runBatch(system: ActorSystem): IO[Unit] =
     for
-      // Dhall REPL または dhall-to-json 経由でジョブ定義を読み込む
+      // Load job definition via Dhall REPL or dhall-to-json
       dhallPath <- IO(Paths.get(
         sys.env.getOrElse("BATCH_JOB_DHALL", "modules/batch-bridge/src/main/resources/BatchJob.dhall")
       ))
@@ -41,17 +41,17 @@ object SiunertaqBatchApp extends IOApp.Simple:
 
       (jobRepository, txMgr) = buildInfra
 
-      // JES2役スーパーバイザーを起動
+      // Start JES2-like supervisor
       supervisor = system.actorOf(
         JobSupervisorActor.props(jobRepository, txMgr),
         name = "jes2-supervisor"
       )
 
-      // ジョブ実行
+      // Execute job
       given Timeout = Timeout(10.minutes)
       result <- IO.fromFuture(IO(supervisor.ask(RunJob(jobDef)).mapTo[JobResult]))
 
-      // 結果出力 (JCL JES2 JLOG相当)
+      // Output results (equivalent to JCL JES2 JLOG)
       _ <- IO.println(s"\n=== JOB LOG: ${result.jobName} ===")
       _ <- IO(result.notes.foreach(println))
       _ <- IO.println(s"=== MAX RC: ${result.maxRC} ===")

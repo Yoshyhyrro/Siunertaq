@@ -9,34 +9,34 @@ import org.springframework.batch.repeat.RepeatStatus
 
 // ─── StackMachineTasklet ─────────────────────────────────────────────────────
 //
-//  BSDQuiver スタックマシンを Spring Batch Tasklet として包む。
+//  BSDQuiver / Siunertaq Scala JVM is a stack machine interpreter for the DSL defined in modules/batch-bridge/src/main/resources/Siunertaq/StackMachine.dhall. 
 //
-//  v2 追加: PerlBridge GADT 相互検証
+//  v2 and later versions of the DSL are designed to be compatible with the Perl implementation in modules/batch-bridge/src/main/resources/perl/Siunertaq/StackMachine.pm.
 //  ─────────────────────────────────
-//  RUN_PERL_CROSSCHECK=1 が設定されている場合:
+//  RUN_PERL_CROSSCHECK=1 the environment variable enables cross-checking the Scala stack machine's output against the Perl implementation.
 //
 //    stepDef.inputProg
 //         │
-//         ├─ ProgramEval.exec         (Scala JVM スタックマシン)
+//         ├─ ProgramEval.exec         (Scala JVM stack machine interpreter)
 //         │        └── JobExecutionContext "$stepName.result"
 //         │
-//         └─ PerlBridge.maybeCheckIO  (Strawberry Perl サブプロセス)
+//         └─ PerlBridge.maybeCheckIO  (Strawberry Perl subprocess execution)
 //                  │
-//                  ├── ProgramLifter.liftTyped → TypedResult  ← GADTと関数が一致
+//                  ├── ProgramLifter.liftTyped → TypedResult  ← GADT is used to select the correct TypedParser for the lifted type T
 //                  │     ScalarTyped → TypedParser[Scalar] → parse(perlOutput)
 //                  │     Vec3Typed   → TypedParser[Vec3]   → parse(perlOutput)
 //                  │
 //                  └── JobExecutionContext "$stepName.perl_check"
-//                        "MATCH: ScalarValue(42)"       → 一致
-//                        "MISMATCH: Scala=... Perl=..." → 不一致 (FAILED に設定)
+//                        "MATCH: ScalarValue(42)"       → Scala and Perl outputs match
+//                        "MISMATCH: Scala=... Perl=..." → Scala and Perl outputs do not match (potential bug) → ExitStatus is set to FAILED
 //
-//  Perl 非インストール / RUN_PERL_CROSSCHECK 未設定 の場合:
-//    "$stepName.perl_check" = "SKIP: ..." と記録し、ExitStatus は変更しない。
+//  Perl not installed / RUN_PERL_CROSSCHECK not set:
+//    "$stepName.perl_check" = "SKIP: ..." is recorded, ExitStatus is not changed.
 //
-//  スレッド安全性:
-//    IO 実行は IORuntime.global (cats-effect) 経由で行う。
-//    PerlBridge.executePerl は IO.blocking を使用し Spring Batch の
-//    スレッドプールをブロックしない。
+//  Thread safety:
+//    IO execution is done via IORuntime.global (cats-effect).
+//    PerlBridge.executePerl uses IO.blocking to avoid blocking Spring Batch's
+//    thread pool.
 
 final class StackMachineTasklet(
   program:  Program,
@@ -55,7 +55,7 @@ final class StackMachineTasklet(
       .getJobExecution
       .getExecutionContext
 
-    // ── Step 1: Scala スタックマシン評価 (必須) ───────────────────────────
+    // ── Step 1: Scala Stack Machine Interpreter ───────────────────────────────
     ProgramEval.exec(program) match
       case Left(error) =>
         execCtx.put(s"$stepName.error", error)
@@ -70,17 +70,17 @@ final class StackMachineTasklet(
           org.springframework.batch.core.ExitStatus.COMPLETED
         )
 
-        // ── Step 2: Perl 相互検証 (オプション) ────────────────────────────
+        // ── Step 2: Perl Cross-Check (Optional) ───────────────────────────────
         //
-        //  PerlBridge.maybeCheckIO が返す Either[String, Value]:
+        //  PerlBridge.maybeCheckIO returns Either[String, Value]:
         //    Right(value) : Scala == Perl → "$stepName.perl_check" = "MATCH: $value"
-        //    Left(skip)   : 検証スキップ  → "$stepName.perl_check" = "SKIP: ..."
-        //    Left(mismatch): 不一致       → ExitStatus を FAILED に変更
+        //    Left(skip)   : Check skipped  → "$stepName.perl_check" = "SKIP: ..."
+        //    Left(mismatch): Mismatch       → ExitStatus is set to FAILED
         //
-        //  GADT dispatch の仕組み (PerlBridge.runViaPerl より):
-        //    liftTyped(program) = ScalarTyped(_)  →  TypedParser[Scalar] を使用
-        //    liftTyped(program) = Vec3Typed(_)    →  TypedParser[Vec3]   を使用
-        //  T を固定するのは TypedResult の match — 型安全な関数選択。
+        //  GADT dispatch is used to select the correct TypedParser for the lifted type T:
+        //    liftTyped(program) = ScalarTyped(_)  →  TypedParser[Scalar] is used
+        //    liftTyped(program) = Vec3Typed(_)    →  TypedParser[Vec3]   is used
+        //  Fixing T is done via pattern matching on TypedResult — type-safe function selection.
 
         val checkResult =
           PerlBridge.maybeCheckIO(program, stepName).unsafeRunSync()(using ioRuntime)
@@ -93,7 +93,7 @@ final class StackMachineTasklet(
             execCtx.put(s"$stepName.perl_check", msg)
 
           case Left(mismatch) if mismatch.contains("MISMATCH") =>
-            // Scala と Perl の結果が食い違う → バグの可能性 → FAILED
+            // Scala and Perl results mismatch → Possible bug → FAILED
             execCtx.put(s"$stepName.perl_check", mismatch)
             contribution.setExitStatus(
               org.springframework.batch.core.ExitStatus.FAILED
@@ -101,7 +101,7 @@ final class StackMachineTasklet(
             )
 
           case Left(perlErr) =>
-            // Perl の実行自体が失敗 (perl が PATH にない等) → WARN 扱い
+            // Perl execution itself failed (e.g., perl not in PATH) → WARN
             execCtx.put(s"$stepName.perl_check", s"PERL_ERROR: $perlErr")
 
     RepeatStatus.FINISHED
