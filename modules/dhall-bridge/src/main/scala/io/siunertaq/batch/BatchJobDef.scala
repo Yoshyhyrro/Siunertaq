@@ -1,10 +1,12 @@
 package io.siunertaq.batch
 
 import io.circe.{Decoder, DecodingFailure, HCursor}
+import io.siunertaq.BSDVertex
 import io.siunertaq.expr.{Instr, Program}
 
 // ─── CondOp ───────────────────────────────────────────────────────────────
-// dhall-to-json: Dhall union < LT | ... > → {"LT": {}} 形式のJSON
+//
+// dhall-to-json: Dhall union < LT | ... > maps to {"LT": {}} etc.
 
 enum CondOp derives CanEqual:
   case LT, LE, EQ, NE, GT, GE
@@ -19,9 +21,10 @@ object CondOp:
   }
 
 // ─── CondExpr ─────────────────────────────────────────────────────────────
-// Compare { threshold=4, op=LT } → {"Compare": {"threshold":4, "op":{"LT":{}}}}
-// Even {}  → {"Even": {}}
-// Only {}  → {"Only": {}}
+//
+// Compare { threshold=4, op=LT } -> {"Compare": {"threshold":4, "op":{"LT":{}}}}
+// Even {}  -> {"Even": {}}
+// Only {}  -> {"Only": {}}
 
 sealed trait CondExpr derives CanEqual
 
@@ -43,45 +46,38 @@ object CondExpr:
       case other        => Left(DecodingFailure(s"Unknown CondExpr: $other", c.history))
   }
 
-// ─── Dhall StackInstr → expr.Instr ────────────────────────────────────────
-// PushScalar { n=12 } → {"PushScalar": {"n":12}}
-// AddScalar {}        → {"AddScalar": {}}
+// ─── BSDVertexTag union -> validated vertex tag string ─────────────────────
+//
+// Dhall's BSDVertexTag union (e.g. {"AffineDual":{}} -> "AffineDual") is
+// validated here against io.siunertaq.BSDVertex.fromTag (core), so a Dhall
+// tag that no longer matches the Scala enum fails decoding immediately with
+// a clear error, instead of silently propagating an unrecognized String.
 
-object StackInstrDecoder:
-  given Decoder[Instr] = Decoder.instance { c =>
-    c.keys.flatMap(_.headOption) match
-      case Some("PushScalar") =>
-        c.downField("PushScalar").downField("n").as[Int].map(Instr.PushScalar.apply)
-      case Some("PushVec3") =>
-        val v = c.downField("PushVec3")
-        for x <- v.downField("x").as[Int]; y <- v.downField("y").as[Int]
-            z <- v.downField("z").as[Int]
-        yield Instr.PushVec3(x, y, z)
-      case Some("AddScalar") => Right(Instr.AddScalar)
-      case Some("AddVec3")   => Right(Instr.AddVec3)
-      case Some("MulScalar") => Right(Instr.MulScalar)
-      case Some("DotVec3")   => Right(Instr.DotVec3)
-      case other             => Left(DecodingFailure(s"Unknown StackInstr: $other", c.history))
-  }
-
-// BSDVertexTag union → キー文字列 (例: {"AffineDual":{}} → "AffineDual")
 private def decodeVertexTag(c: HCursor): Either[DecodingFailure, String] =
   c.keys.flatMap(_.headOption)
    .toRight(DecodingFailure("Expected BSDVertexTag union", c.history))
+   .flatMap { tag =>
+     BSDVertex.fromTag(tag)
+       .map(_ => tag)
+       .left.map(msg => DecodingFailure(msg, c.history))
+   }
 
 // ─── StepDef ──────────────────────────────────────────────────────────────
+//
+// Note: Decoder[Instr] and Decoder[Program] are resolved automatically via
+// io.siunertaq.expr.Instr / Program's companion objects (core) — no explicit
+// import needed, now that StackInstrDecoder has moved to core.
 
 final case class StepDef(
   name:       String,
   effectTag:  String,
   cond:       Option[CondExpr],
-  normVertex: String,    // "AffineDual", "Selmer" 等 (BSDVertex.toString と一致)
-  inputProg:  Program,   // Vector[Instr] — スタックマシン入力
+  normVertex: String,    // "AffineDual", "Selmer", etc. (validated against BSDVertex)
+  inputProg:  Program,   // Vector[Instr] - the stack machine instruction sequence
   priority:   Int
 ) derives CanEqual
 
 object StepDef:
-  import StackInstrDecoder.given
   given Decoder[StepDef] = Decoder.instance { c =>
     for
       name       <- c.downField("name").as[String]
@@ -89,7 +85,7 @@ object StepDef:
       cond       <- c.downField("cond").as[Option[CondExpr]]
       normVertex <- c.downField("norm_vertex")
                .as(using Decoder.instance(decodeVertexTag))
-      inputProg  <- c.downField("input_prog").as[List[Instr]].map(_.toVector)
+      inputProg  <- c.downField("input_prog").as[Program]
       priority   <- c.downField("priority").as[Int]
     yield StepDef(name, effectTag, cond, normVertex, inputProg, priority)
   }
