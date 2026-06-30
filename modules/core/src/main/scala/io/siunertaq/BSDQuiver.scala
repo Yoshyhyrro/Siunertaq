@@ -41,6 +41,26 @@ enum BSDVertex derives CanEqual:
   case Padic       // O^p
   case Selmer      // Σ_I
 
+object BSDVertex:
+  // ─── Dhall BSDVertexTag との橋渡し ─────────────────────────────────────────
+  //
+  //  BatchJob.dhall / PetersenMZV.dhall は以下を独立に定義する:
+  //    let BSDVertexTag = < Leech | AffineDual | Padic | Selmer >
+  //
+  //  dhall-to-json は union タグをそのまま JSON キー文字列にする
+  //  (例: BSDVertexTag.AffineDual → {"AffineDual":{}})。
+  //  BatchJobDef.scala の StackInstrDecoder はこれまでこの一致を
+  //  コメントでのみ保証していた:
+  //    // BSDVertexTag union → キー文字列 (BSDVertex.toString と一致)
+  //
+  //  fromTag はこの契約を関数として明示化し、テスト可能にする。
+  //  BSDVertex.toString の自然な出力 (case 名そのまま) を正準形として使う。
+  def fromTag(tag: String): Either[String, BSDVertex] =
+    values.find(_.toString == tag).toRight(s"Unknown BSDVertexTag: $tag")
+
+  /** fromTag の逆方向。Dhall 側に渡す / JSON に書き出すときの正準文字列。 */
+  def toTag(vertex: BSDVertex): String = vertex.toString
+
 import BSDVertex.*
 
 /** Directional roles: Frobenius / Verschiebung */
