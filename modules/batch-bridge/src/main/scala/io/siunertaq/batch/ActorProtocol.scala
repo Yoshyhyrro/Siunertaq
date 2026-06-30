@@ -1,8 +1,6 @@
 package io.siunertaq.batch
 
-import org.apache.pekko.actor.ActorRef
-
-// ─── JCL from Siunertaq Batch DSL ───────────────────────────────────────────────
+// ─── JCL from Siunertaq Batch DSL ──────────────────────────────────────────
 
 /** that is jcl whith jobcard and exec card, but not jcl syntax */
 final case class RunJob(jobDef: BatchJobDef)
