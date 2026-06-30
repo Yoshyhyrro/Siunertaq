@@ -1,6 +1,6 @@
 package io.siunertaq.expr
 
-import io.circe.Json
+import io.circe.{Decoder, DecodingFailure, Json}
 import io.circe.syntax.*
 
 // Instr mirrors Math_Program.Instr_Kind in SPARK/Ada
@@ -12,21 +12,54 @@ enum Instr derives CanEqual:
   case MulScalar
   case DotVec3
 
+object Instr:
+  // ─── Canonical StackInstr JSON decoder ─────────────────────────────────────
+  //
+  //  Paired with Program.toJson (the encode direction). This is the same JSON
+  //  shape produced by:
+  //    - dhall-to-json, decoding Dhall's `StackInstr` union
+  //      (e.g. PushScalar { n = 12 } -> {"PushScalar":{"n":12}})
+  //    - ClassASTBridge.opcodeToInstr (.class bytecode -> JSON)
+  //    - Siunertaq::StackMachine->execute_json (Perl, consuming the same JSON)
+  //
+  //  Moved here from dhall-bridge's StackInstrDecoder so that `core` owns both
+  //  directions of the Instr <-> JSON correspondence. Any module that already
+  //  depends on `core` (batch-bridge, postgres-bridge, dhall-bridge) gets this
+  //  decoder for free via companion-object implicit resolution — no import of
+  //  `Instr.given` is needed at call sites.
+  given Decoder[Instr] = Decoder.instance { c =>
+    c.keys.flatMap(_.headOption) match
+      case Some("PushScalar") =>
+        c.downField("PushScalar").downField("n").as[Int].map(Instr.PushScalar.apply)
+      case Some("PushVec3") =>
+        val v = c.downField("PushVec3")
+        for
+          x <- v.downField("x").as[Int]
+          y <- v.downField("y").as[Int]
+          z <- v.downField("z").as[Int]
+        yield Instr.PushVec3(x, y, z)
+      case Some("AddScalar") => Right(Instr.AddScalar)
+      case Some("AddVec3")   => Right(Instr.AddVec3)
+      case Some("MulScalar") => Right(Instr.MulScalar)
+      case Some("DotVec3")   => Right(Instr.DotVec3)
+      case other             => Left(DecodingFailure(s"Unknown StackInstr: $other", c.history))
+  }
+
 type Program      = Vector[Instr]
 type MachineStack = List[Value]
 
 object Program:
   val empty: Program = Vector.empty
 
-  /** Program → 正規 StackInstr JSON 配列。
+  /** Program -> canonical StackInstr JSON array.
    *
-   *  この形式は3箇所で共有される中間表現:
-   *    - ClassASTBridge.opcodeToInstr   (.class → JSON)
-   *    - ForthRegistrar.registerStep    (PostgreSQL JSONB instructions 列)
-   *    - Siunertaq::StackMachine->execute_json  (Perl 側 JSON::PP)
+   *  This format is shared across three layers of the stack:
+   *    - ClassASTBridge.opcodeToInstr   (.class bytecode -> JSON)
+   *    - ForthRegistrar.registerStep    (PostgreSQL JSONB `instructions` column)
+   *    - Siunertaq::StackMachine->execute_json  (Perl, via JSON::PP)
    *
-   *  キー名は ClassASTBridge と完全一致させること。
-   *  新しい Instr を追加した場合は StackMachine.pm の execute_json も更新する。
+   *  Key names must stay identical to ClassASTBridge's. If a new Instr variant
+   *  is added, update Siunertaq::StackMachine.pm's execute_json accordingly.
    */
   def toJson(program: Program): Json =
     Json.fromValues(program.map {
@@ -38,6 +71,10 @@ object Program:
       case Instr.MulScalar         => Json.obj("MulScalar"  -> Json.obj())
       case Instr.DotVec3           => Json.obj("DotVec3"    -> Json.obj())
     })
+
+  /** JSON array -> Program. Inverse of toJson; built from the companion's
+   *  Decoder[Instr], decoding a JSON array and converting to Vector. */
+  given Decoder[Program] = summon[Decoder[List[Instr]]].map(_.toVector)
 
 object Stack:
   val empty: MachineStack = Nil
