@@ -4,6 +4,7 @@ import cats.effect.{IO, Ref}
 import cats.effect.unsafe.IORuntime
 import io.circe.Json
 import io.circe.syntax.*
+import io.siunertaq.NamespaceCanon
 import org.apache.pekko.actor.{Actor, ActorLogging, OneForOneStrategy, Props, SupervisorStrategy, Timers}
 
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
@@ -41,6 +42,15 @@ import scala.concurrent.duration.*
 //  ClickHouse HTTP API:
 //    POST http://host:8123/?query=INSERT+INTO+table+FORMAT+JSONEachRow
 //    Body: one JSON object per line (JSONEachRow)
+//
+//  canonical_name:
+//    Every row pushed to bytecode_instructions / forth_words also carries
+//    canonical_name, computed once here via NamespaceCanon.fromJvm(class, method).
+//    This is the single source of truth for the cross-language join key used
+//    by the future cross_language_equivalences ClickHouse VIEW (paired with a
+//    Perl-side equivalent once PmASTBridge exists). MecrispCompiler.BytecodeRow
+//    and MecrispWordDef are left untouched; the field is injected here at the
+//    JSON-serialization boundary instead.
 
 // ── Protocol ────────────────────────────────────────────────────────────────
 //
@@ -194,11 +204,18 @@ final class ClickHouseSyncActor(
     flushWords()
     flushMZV()
 
+  // Injects the NamespaceCanon-derived cross-language join key into the
+  // BytecodeRow JSON without modifying MecrispCompiler.BytecodeRow itself.
+  private def withCanonicalName(row: MecrispCompiler.BytecodeRow): Json =
+    row.toJson.mapObject(
+      _.add("canonical_name", NamespaceCanon.fromJvm(row.className, row.methodName).asJson)
+    )
+
   private def flushBytecode(): Unit =
     if bytecodeBuf.isEmpty then return
     val rows    = bytecodeBuf.toVector
     bytecodeBuf.clear()
-    val payload = rows.map(_.toJson.noSpaces).mkString("\n")
+    val payload = rows.map(row => withCanonicalName(row).noSpaces).mkString("\n")
     post(cfg.endpoint("bytecode_instructions"), payload) match
       case Right(_) =>
         log.info("[CH] ✓ bytecode_instructions: {} rows", rows.size)
@@ -215,6 +232,7 @@ final class ClickHouseSyncActor(
         "word_name"          -> w.name.asJson,
         "class_name"         -> w.sourceClass.asJson,
         "method_name"        -> w.sourceMethod.asJson,
+        "canonical_name"     -> NamespaceCanon.fromJvm(w.sourceClass, w.sourceMethod).asJson,
         "method_descriptor"  -> w.sourceDesc.asJson,
         "stack_effect"       -> w.stackEffect.asJson,
         "body_tokens"        -> w.bodyTokens.asJson,
