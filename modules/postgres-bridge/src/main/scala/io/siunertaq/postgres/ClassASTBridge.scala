@@ -5,25 +5,25 @@ import io.circe.Json
 import io.circe.syntax.*
 import org.objectweb.asm.{ClassReader, ClassVisitor, MethodVisitor, Opcodes}
 
-// ─── ClassASTBridge — .class バイトコード → JSONB StackInstr ─────────────────
+// ─── ClassASTBridge — .class bytecode -> JSONB StackInstr ────────────────────
 //
-//  StackInstr は Dhall / Scala / PostgreSQL で共通の中間表現。
-//  このブリッジにより「JVM が実行したもの」と「Forth が記録したもの」が
-//  同じ構造で揃う (向きをそろえた状態)。
+//  StackInstr is the shared intermediate representation across Dhall, Scala,
+//  PostgreSQL, and Perl. This bridge ensures that "what the JVM executed" and
+//  "what Forth recorded" land in the same format.
 //
-//  対応オペコード (算術のみ; 制御フローはスキップ):
-//    BIPUSH/SIPUSH/ICONST_N → PushScalar
-//    IADD                   → AddScalar
-//    IMUL                   → MulScalar
+//  Supported opcodes (arithmetic only; control flow is skipped):
+//    BIPUSH / SIPUSH / ICONST_N -> PushScalar
+//    IADD                       -> AddScalar
+//    IMUL                       -> MulScalar
 //
-//  使い方:
+//  Usage:
 //    ClassASTBridge
 //      .extractFromBytes(classBytes, targetMethod = "execute")
 //      .flatMap(instrJson => registrar.registerStep(..., instructions = instrJson))
 
 object ClassASTBridge:
 
-  // ── JVM opcode → StackInstr JSON ─────────────────────────────────────────
+  // ── JVM opcode -> StackInstr JSON ────────────────────────────────────────
   def opcodeToInstr(opcode: Int, operand: Option[Int] = None): Option[Json] =
     opcode match
       case Opcodes.BIPUSH | Opcodes.SIPUSH =>
@@ -36,9 +36,9 @@ object ClassASTBridge:
       case Opcodes.ICONST_5 => Some(Json.obj("PushScalar" -> Json.obj("n" -> 5.asJson)))
       case Opcodes.IADD     => Some(Json.obj("AddScalar"  -> Json.obj()))
       case Opcodes.IMUL     => Some(Json.obj("MulScalar"  -> Json.obj()))
-      case _                => None  // 制御フロー・型変換等はスキップ
+      case _                => None  // control flow / type conversion etc. are skipped
 
-  // ── .class バイト列 → StackInstr JSON 配列 ────────────────────────────────
+  // ── .class byte array -> StackInstr JSON array ───────────────────────────
   def extractFromBytes(
     classBytes:   Array[Byte],
     targetMethod: String = "execute"
@@ -66,7 +66,7 @@ object ClassASTBridge:
       instructions.toList.asJson
     }
 
-  // ── .class ファイルパス → ForthRegistrar.registerStep() ──────────────────
+  // ── .class file path -> ForthRegistrar.registerStep() ───────────────────
   def registerFromClassFile(
     path:         java.nio.file.Path,
     args:         ForthOp.RegisterStepArgs,
