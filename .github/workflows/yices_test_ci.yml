@@ -89,6 +89,7 @@ jobs:
             "batchBridge/compile"                               \
             "batchBridge/testOnly io.siunertaq.batch.PerlBridgeSpec" \
             "postgresBridge/compile"                            \
+            "postgresBridge/testOnly io.siunertaq.postgres.*"     \
             "petersenMzv/compile"                              \
             "yicesBridge/testOnly io.siunertaq.yicesbridge.*"
 
@@ -128,7 +129,7 @@ jobs:
           # ── .class: package パスを保持して収集 ───────────────────────────
           # target/scala-3.x.x/classes/ 以下は depth 4+ → maxdepth なしで探索
           # ${f##*/classes/} で classes/ 以降のパスだけ取り出してコピー
-          for mod in core batch-bridge; do
+          for mod in core batch-bridge postgres-bridge; do
             find "modules/$mod/target" -name "*.class" -path "*/classes/io/*" \
               -print0 | while IFS= read -r -d '' f; do
                 rel="${f##*/classes/}"
