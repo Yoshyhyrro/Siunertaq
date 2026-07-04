@@ -1,0 +1,51 @@
+# docker-compose.yml — Perl cross-version round-trip check
+#
+# Ordering (all producers before any consumer) is enforced by run.sh, not
+# by compose itself (no depends_on needed): every service here is a
+# one-shot batch job (`docker compose run --rm <name>`), not a persistent
+# service, so compose's orchestration features (networking, depends_on
+# with health checks, etc.) aren't actually needed for this design.
+#
+# NxM matrix: 4 producer versions x 4 consumer versions, via a shared
+# bind-mounted ./fixtures directory instead of any network communication.
+
+services:
+  produce-5-16:
+    image: perl:5.16
+    volumes: ["./fixtures:/fixtures"]
+    command: ["perl", "/fixtures/producer.pl", "5.16"]
+
+  produce-5-26:
+    image: perl:5.26
+    volumes: ["./fixtures:/fixtures"]
+    command: ["perl", "/fixtures/producer.pl", "5.26"]
+
+  produce-5-34:
+    image: perl:5.34
+    volumes: ["./fixtures:/fixtures"]
+    command: ["perl", "/fixtures/producer.pl", "5.34"]
+
+  produce-latest:
+    image: perl:latest
+    volumes: ["./fixtures:/fixtures"]
+    command: ["perl", "/fixtures/producer.pl", "latest"]
+
+  consume-5-16:
+    image: perl:5.16
+    volumes: ["./fixtures:/fixtures"]
+    command: ["perl", "/fixtures/consumer_check_all.pl", "5.16", "4"]
+
+  consume-5-26:
+    image: perl:5.26
+    volumes: ["./fixtures:/fixtures"]
+    command: ["perl", "/fixtures/consumer_check_all.pl", "5.26", "4"]
+
+  consume-5-34:
+    image: perl:5.34
+    volumes: ["./fixtures:/fixtures"]
+    command: ["perl", "/fixtures/consumer_check_all.pl", "5.34", "4"]
+
+  consume-latest:
+    image: perl:latest
+    volumes: ["./fixtures:/fixtures"]
+    command: ["perl", "/fixtures/consumer_check_all.pl", "latest", "4"]
