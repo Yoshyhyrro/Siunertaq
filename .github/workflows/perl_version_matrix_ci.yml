@@ -33,8 +33,8 @@ jobs:
       # ★ここを追加：Docker daemon に古いイメージを許可させて再起動
       - name: Enable deprecated image spec in Docker daemon
         run: |
-          sudo jq '. + {"deprecated-image-spec-management": true}' /etc/docker/daemon.json > tmp.json
-          sudo mv tmp.json /etc/docker/daemon.json
+          sudo mkdir -p /etc/docker
+          echo '{"deprecated-image-spec-management": true}' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
 
       - name: Run producer/consumer round-trip matrix
