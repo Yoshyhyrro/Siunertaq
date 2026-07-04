@@ -1,7 +1,7 @@
 - pipeline: perl_version_matrix_ci_yml
   name: Pipeline
   refs:
-  - refs/heads/main
+  - refs/heads/hotfix/namespace
   fail_on_prepare_env_warning: true
   events:
   - type: WEBHOOK
