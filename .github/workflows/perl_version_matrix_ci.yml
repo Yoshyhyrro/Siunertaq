@@ -35,7 +35,7 @@ jobs:
       # apt-get install step).
       - name: Run producer/consumer round-trip matrix
         working-directory: modules/batch-bridge/src/test/resources/perl-version-matrix
-        run: ./run.sh
+        run: ./modules/batch-bridge/src/test/resources/perl-version-matrix/perl-version-matrix/run.sh
 
       - name: Show container logs on failure
         if: failure()
