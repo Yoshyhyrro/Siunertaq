@@ -5,4 +5,5 @@
   fail_on_prepare_env_warning: true
   events:
   - type: WEBHOOK
+    totp: true
   arch: ARM64
