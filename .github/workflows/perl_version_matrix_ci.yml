@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 name: Perl Cross-Version Round-Trip Check
 
 on:
@@ -49,3 +50,14 @@ jobs:
           name: perl-round-trip-fixtures-${{ github.sha }}
           path: modules/batch-bridge/src/test/resources/perl-version-matrix/fixtures/out
           if-no-files-found: warn
+=======
+- pipeline: perl_version_matrix_ci_yml
+  name: Pipeline
+  refs:
+  - refs/heads/hotfix/namespace
+  fail_on_prepare_env_warning: true
+  events:
+  - type: WEBHOOK
+    totp: true
+  arch: ARM64
+>>>>>>> 67e1d153c093204b4bc954d82041927087029a09
