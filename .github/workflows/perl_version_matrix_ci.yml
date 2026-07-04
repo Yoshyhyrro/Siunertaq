@@ -26,19 +26,13 @@ jobs:
   perl-round-trip:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # ジョブ全体でレガシーなDockerイメージフォーマット(Perl 5.16)を許可する
+    env:
+      DOCKER_ENABLE_DEPRECATED_IMAGE_SPEC: "true"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      # ubuntu-latest already ships Docker + the docker compose v2 plugin,
-      # so no extra setup step is needed here (unlike the Yices workflow's
-      # apt-get install step).
-      #
-      # NOTE: this assumes the perl-version-matrix directory has been
-      # flattened (no nested perl-version-matrix/perl-version-matrix/).
-      # working-directory below is the single source of truth for the
-      # location; run.sh is referenced relatively so it stays correct
-      # even if this directory ever moves again.
       - name: Run producer/consumer round-trip matrix
         working-directory: modules/batch-bridge/src/test/resources/perl-version-matrix
         run: ./run.sh
