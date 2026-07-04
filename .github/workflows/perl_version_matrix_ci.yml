@@ -1,0 +1,51 @@
+name: Perl Cross-Version Round-Trip Check
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hotfix/namespace
+    paths:
+      - modules/batch-bridge/src/main/resources/perl/**
+      - modules/batch-bridge/src/test/resources/perl-version-matrix/**
+      - .github/workflows/perl_version_matrix_ci.yml
+  pull_request:
+    paths:
+      - modules/batch-bridge/src/main/resources/perl/**
+      - modules/batch-bridge/src/test/resources/perl-version-matrix/**
+      - .github/workflows/perl_version_matrix_ci.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perl-round-trip-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  perl-round-trip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # ubuntu-latest already ships Docker + the docker compose v2 plugin,
+      # so no extra setup step is needed here (unlike the Yices workflow's
+      # apt-get install step).
+      - name: Run producer/consumer round-trip matrix
+        working-directory: modules/batch-bridge/src/test/resources/perl-version-matrix
+        run: ./run.sh
+
+      - name: Show container logs on failure
+        if: failure()
+        working-directory: modules/batch-bridge/src/test/resources/perl-version-matrix
+        run: docker compose logs || true
+
+      - name: Upload fixture JSON on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perl-round-trip-fixtures-${{ github.sha }}
+          path: modules/batch-bridge/src/test/resources/perl-version-matrix/fixtures/out
+          if-no-files-found: warn
