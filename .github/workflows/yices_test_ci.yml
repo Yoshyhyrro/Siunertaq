@@ -9,11 +9,11 @@ on:
       - build.sbt
       - modules/core/**
       - modules/z3-bridge/**
-      - modules/dhall-bridge/**          # CondEvaluatorSpec がここに入る
-      - modules/batch-bridge/**          # PerlBridge / RubyBridge ソース変更を捕捉
+      - modules/dhall-bridge/** # CondEvaluatorSpec がここに入る
+      - modules/batch-bridge/** # PerlBridge / RubyBridge ソース変更を捕捉
       - modules/yices-bridge/**
-      - examples/**               # examples の変更もテストに影響する可能性があるため
-      - modules/postgres-bridge/**  # postgres-bridge の変更もテストに影響する可能性があるため
+      - examples/** # examples の変更もテストに影響する可能性があるため
+      - modules/postgres-bridge/** # postgres-bridge の変更もテストに影響する可能性があるため
       - .github/workflows/yices_test_ci.yml
   pull_request:
     paths:
@@ -21,10 +21,10 @@ on:
       - modules/core/**
       - modules/z3-bridge/**
       - modules/dhall-bridge/**
-      - modules/batch-bridge/**          # PerlBridge / RubyBridge ソース変更を捕捉
+      - modules/batch-bridge/** # PerlBridge / RubyBridge ソース変更を捕捉
       - modules/yices-bridge/**
-      - examples/**                      # examples の変更もテストに影響する可能性があるため
-      - modules/postgres-bridge/**       # postgres-bridge の変更もテストに影響する可能性があるため
+      - examples/** # examples の変更もテストに影響する可能性があるため
+      - modules/postgres-bridge/** # postgres-bridge の変更もテストに影響する可能性があるため
       - .github/workflows/yices_test_ci.yml
 
 permissions:
@@ -42,6 +42,11 @@ jobs:
       YICES_ARTIFACT_DIR: modules/yices-bridge/target/yices-artifacts
       RUN_PERL_CROSSCHECK: "1"                       # PerlBridgeSpec + .pl スクリプト生成を有効化
       PERL_SCRIPT_SAVE_DIR: ci-out/perl-scripts      # 生成 .pl を artifact として保持
+      
+      # Sync GCC compiler strictness with the legacy replication setup.
+      # Forces modern GCC to accept legacy standards and prevents unexpected warnings-as-errors from failing builds.
+      CFLAGS: "-std=gnu89 -O1 -fno-strict-aliasing -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types"
+      PERL_MM_OPT: "CCFLAGS='-std=gnu89 -O1 -fno-strict-aliasing -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types'"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
