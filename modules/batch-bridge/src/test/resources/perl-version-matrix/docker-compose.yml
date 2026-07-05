@@ -8,10 +8,22 @@
 #
 # NxM matrix: 4 producer versions x 4 consumer versions, via a shared
 # bind-mounted ./fixtures directory instead of any network communication.
+#
+# perl:5.16 is built locally (see Dockerfile.perl-5.16) instead of pulled,
+# because that Docker Hub tag still carries a legacy Image Manifest v2
+# Schema 1, which Docker Engine no longer supports pulling as of v28.2.
+# The other tags (5.26 / 5.34 / latest) are assumed to still be pullable
+# as-is -- this has NOT been independently verified end-to-end (no Docker
+# daemon available to test with here). If `docker compose pull` fails on
+# any of them with the same "manifest v1" error, apply the same
+# build-from-source pattern as Dockerfile.perl-5.16, swapping in the
+# matching https://www.cpan.org/src/5.0/perl-X.Y.Z.tar.gz URL.
 
 services:
   produce-5-16:
-    image: perl:5.16
+    build:
+      context: .
+      dockerfile: Dockerfile.perl-5.16
     volumes: ["./fixtures:/fixtures"]
     command: ["perl", "/fixtures/producer.pl", "5.16"]
 
@@ -31,7 +43,9 @@ services:
     command: ["perl", "/fixtures/producer.pl", "latest"]
 
   consume-5-16:
-    image: perl:5.16
+    build:
+      context: .
+      dockerfile: Dockerfile.perl-5.16
     volumes: ["./fixtures:/fixtures"]
     command: ["perl", "/fixtures/consumer_check_all.pl", "5.16", "4"]
 

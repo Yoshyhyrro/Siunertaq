@@ -30,7 +30,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      # ★ここを追加：Docker daemon に古いイメージを許可させて再起動
+        
       - name: Enable deprecated image spec in Docker daemon
         run: |
           sudo mkdir -p /etc/docker
