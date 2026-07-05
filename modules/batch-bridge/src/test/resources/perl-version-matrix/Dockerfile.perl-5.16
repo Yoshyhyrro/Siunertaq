@@ -1,19 +1,14 @@
 # Dockerfile.perl-5.16
 #
 # perl:5.16 on Docker Hub still carries a legacy Image Manifest v2 Schema 1.
-# Docker Engine stopped supporting pulling that format entirely as of
-# v28.2 (disabled by default since v26.0) -- see
-# https://docs.docker.com/go/deprecated-image-specs/. There is no
-# daemon.json setting that restores this; Docker's own guidance is to
-# rebuild the image from a current base instead, which is what this does.
+# Docker Engine stopped supporting pulling that format entirely as of v28.2.
 #
 # JSON::PP ships as a core module in this build (core since Perl 5.14),
-# so no extra cpan install step is needed for the checks this project
-# currently runs.
+# so no extra cpan install step is needed for the checks this project runs.
 
 FROM debian:bookworm-slim AS build
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential curl ca-certificates \
+    && apt-get install -y --no-install-recommends build-essential curl ca-certificates perl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src
@@ -22,10 +17,12 @@ RUN curl -fsSL https://www.cpan.org/src/5.0/perl-5.16.0.tar.gz -o perl.tar.gz \
 
 WORKDIR /usr/src/perl-5.16.0
 
-# Force the modern GCC compiler to accept old C89/GNU89 standards and 
-# treat modern standard violations as warnings rather than fatal build errors.
-RUN ./Configure -des -Dprefix=/opt/perl-5.16.0 \
-    -Dccflags='-std=gnu89 -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types' \
+# 1. Use PatchPerl to safely apply compatibility and compiler patches for Perl 5.16 on modern systems.
+# 2. Force legacy C standard flags (-std=gnu89) and lower optimization to -O0 / -O1 to prevent GCC from generating segfaulting binaries.
+RUN curl -fsSL https://cpanmin.us | perl - Devel::PatchPerl \
+    && /usr/local/bin/patchperl \
+    && ./Configure -des -Dprefix=/opt/perl-5.16.0 \
+    -Dccflags='-std=gnu89 -O1 -fno-strict-aliasing -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types' \
     && make -j"$(nproc)" \
     && make install
 
