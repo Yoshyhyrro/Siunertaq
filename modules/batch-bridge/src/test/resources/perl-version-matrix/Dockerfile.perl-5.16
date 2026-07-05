@@ -21,8 +21,11 @@ RUN curl -fsSL https://www.cpan.org/src/5.0/perl-5.16.0.tar.gz -o perl.tar.gz \
     && tar xzf perl.tar.gz
 
 WORKDIR /usr/src/perl-5.16.0
-# -des: accept defaults, non-interactive.
+
+# Force the modern GCC compiler to accept old C89/GNU89 standards and 
+# treat modern standard violations as warnings rather than fatal build errors.
 RUN ./Configure -des -Dprefix=/opt/perl-5.16.0 \
+    -Dccflags='-std=gnu89 -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types' \
     && make -j"$(nproc)" \
     && make install
 
