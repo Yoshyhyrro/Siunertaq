@@ -1,0 +1,31 @@
+# Dockerfile.perl-5.16
+#
+# perl:5.16 on Docker Hub still carries a legacy Image Manifest v2 Schema 1.
+# Docker Engine stopped supporting pulling that format entirely as of
+# v28.2 (disabled by default since v26.0) -- see
+# https://docs.docker.com/go/deprecated-image-specs/. There is no
+# daemon.json setting that restores this; Docker's own guidance is to
+# rebuild the image from a current base instead, which is what this does.
+#
+# JSON::PP ships as a core module in this build (core since Perl 5.14),
+# so no extra cpan install step is needed for the checks this project
+# currently runs.
+
+FROM debian:bookworm-slim AS build
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /usr/src
+RUN curl -fsSL https://www.cpan.org/src/5.0/perl-5.16.0.tar.gz -o perl.tar.gz \
+    && tar xzf perl.tar.gz
+
+WORKDIR /usr/src/perl-5.16.0
+# -des: accept defaults, non-interactive.
+RUN ./Configure -des -Dprefix=/opt/perl-5.16.0 \
+    && make -j"$(nproc)" \
+    && make install
+
+FROM debian:bookworm-slim
+COPY --from=build /opt/perl-5.16.0 /opt/perl-5.16.0
+ENV PATH="/opt/perl-5.16.0/bin:${PATH}"
