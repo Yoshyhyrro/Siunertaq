@@ -7,8 +7,8 @@ cd "$(dirname "$0")"
 mkdir -p fixtures/out
 rm -f fixtures/out/*.json
 
-# Upgraded the baseline Perl version from 5-16 to 5-20 to support modern OCI image manifests.
-versions=(5-20 5-26 5-34 latest)
+# Restored the baseline Perl version to 5-16 to accurately reproduce the legacy environment.
+versions=(5-16 5-26 5-34 latest)
 
 echo "=== producing ==="
 for v in "${versions[@]}"; do
