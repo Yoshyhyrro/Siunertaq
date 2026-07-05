@@ -25,18 +25,24 @@ concurrency:
 jobs:
   perl-round-trip:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Building perl:5.16 from source (see Dockerfile.perl-5.16) adds a few
+    # minutes vs. pulling a pre-built tag -- bumped from 10 to 20.
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-        
-      - name: Enable deprecated image spec in Docker daemon
-        run: |
-          sudo mkdir -p /etc/docker
-          echo '{"deprecated-image-spec-management": true}' | sudo tee /etc/docker/daemon.json
-          sudo systemctl restart docker
-
+      # ubuntu-latest already ships Docker + the docker compose v2 plugin,
+      # so no extra setup step is needed here (unlike the Yices workflow's
+      # apt-get install step).
+      #
+      # NOTE: there is no daemon.json setting that "re-enables" pulling
+      # legacy Image Manifest v2 Schema 1 images (removed in Docker Engine
+      # v28.2) -- a previous attempt at that here broke the Docker daemon
+      # outright and caused this whole job to fail before the real test
+      # step even ran. The actual fix is Dockerfile.perl-5.16, which
+      # builds that Perl version from source on a current base image
+      # instead of pulling the old perl:5.16 tag.
       - name: Run producer/consumer round-trip matrix
         working-directory: modules/batch-bridge/src/test/resources/perl-version-matrix
         run: ./run.sh
