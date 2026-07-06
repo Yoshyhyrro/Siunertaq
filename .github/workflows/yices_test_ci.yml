@@ -9,11 +9,11 @@ on:
       - build.sbt
       - modules/core/**
       - modules/z3-bridge/**
-      - modules/dhall-bridge/** # CondEvaluatorSpec がここに入る
-      - modules/batch-bridge/** # PerlBridge / RubyBridge ソース変更を捕捉
+      - modules/dhall-bridge/**
+      - modules/batch-bridge/**
       - modules/yices-bridge/**
-      - examples/** # examples の変更もテストに影響する可能性があるため
-      - modules/postgres-bridge/** # postgres-bridge の変更もテストに影響する可能性があるため
+      - examples/**
+      - modules/postgres-bridge/**
       - .github/workflows/yices_test_ci.yml
   pull_request:
     paths:
@@ -21,10 +21,10 @@ on:
       - modules/core/**
       - modules/z3-bridge/**
       - modules/dhall-bridge/**
-      - modules/batch-bridge/** # PerlBridge / RubyBridge ソース変更を捕捉
+      - modules/batch-bridge/**
       - modules/yices-bridge/**
-      - examples/** # examples の変更もテストに影響する可能性があるため
-      - modules/postgres-bridge/** # postgres-bridge の変更もテストに影響する可能性があるため
+      - examples/**
+      - modules/postgres-bridge/**
       - .github/workflows/yices_test_ci.yml
 
 permissions:
@@ -40,13 +40,21 @@ jobs:
     env:
       RUN_YICES_SMOKE: "1"
       YICES_ARTIFACT_DIR: modules/yices-bridge/target/yices-artifacts
-      RUN_PERL_CROSSCHECK: "1"                       # PerlBridgeSpec + .pl スクリプト生成を有効化
-      PERL_SCRIPT_SAVE_DIR: ci-out/perl-scripts      # 生成 .pl を artifact として保持
+      RUN_PERL_CROSSCHECK: "1"
+      PERL_SCRIPT_SAVE_DIR: ci-out/perl-scripts
       
-      # Sync GCC compiler strictness with the legacy replication setup.
-      # Forces modern GCC to accept legacy standards and prevents unexpected warnings-as-errors from failing builds.
-      CFLAGS: "-std=gnu89 -O1 -fno-strict-aliasing -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types"
-      PERL_MM_OPT: "CCFLAGS='-std=gnu89 -O1 -fno-strict-aliasing -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types'"
+      # --- Legacy C Compatibility Layer ---
+      # Modern GCC (10+) has introduced strict defaults that break legacy C code:
+      # 1. -std=gnu89: Use the 1989 standard with GNU extensions.
+      # 2. -fcommon: Revert the default '-fno-common' to allow multiple definitions of 
+      #    uninitialized global variables (essential for many old Perl XS/C libs).
+      # 3. -Wno-error: Ensure that warnings (implicit declarations, etc.) do not 
+      #    terminate the build.
+      # 4. -fno-strict-aliasing: Prevent aggressive optimization bugs in legacy pointer casting.
+      COMMON_C_FLAGS: "-std=gnu89 -O1 -fcommon -fno-strict-aliasing -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types -Wno-error"
+      CFLAGS: "${{ env.COMMON_C_FLAGS }}"
+      PERL_MM_OPT: "CCFLAGS='${{ env.COMMON_C_FLAGS }}'"
+      
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -76,7 +84,6 @@ jobs:
           set -euxo pipefail
           yices-smt2 --version
 
-      # CondEvaluator は純粋関数なので Yices 不要・先に単独で実行
       - name: Run CondEvaluator unit tests (pure; no Yices required)
         shell: bash
         run: |
@@ -98,11 +105,6 @@ jobs:
             "petersenMzv/compile"                              \
             "yicesBridge/testOnly io.siunertaq.yicesbridge.*"
 
-      # ─── 共通ライブラリ成果物 ──────────────────────────────────────────────
-      # compile 済みクラスから JAR を生成する。incremental なので追加コストは小さい。
-      # 対象: core (Program / Instr / Value の IR 定義)
-      #        batch-bridge (PerlBridge / StackMachineTasklet / ScriptBackend)
-      #        postgres-bridge (ClickHouse スキーマ + CDC パイプライン)
       - name: Package common library JARs
         if: success()
         shell: bash
@@ -118,9 +120,8 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          mkdir -p ci-out/schema ci-out/perl-scripts   # perl-scripts は find 前に必ず作る
+          mkdir -p ci-out/schema ci-out/perl-scripts
 
-          # ── JAR: モジュール別サブディレクトリに収める (同名上書き防止) ───────
           for mod in core batch-bridge postgres-bridge; do
             src="modules/$mod/target"
             dest="ci-out/jars/$mod"
@@ -131,9 +132,6 @@ jobs:
               -print0 | xargs -0 -I{} cp {} "$dest/"
           done
 
-          # ── .class: package パスを保持して収集 ───────────────────────────
-          # target/scala-3.x.x/classes/ 以下は depth 4+ → maxdepth なしで探索
-          # ${f##*/classes/} で classes/ 以降のパスだけ取り出してコピー
           for mod in core batch-bridge postgres-bridge; do
             find "modules/$mod/target" -name "*.class" -path "*/classes/io/*" \
               -print0 | while IFS= read -r -d '' f; do
@@ -144,26 +142,22 @@ jobs:
               done
           done
 
-          # ── .pl: PERL_SCRIPT_SAVE_DIR に保存済みのスクリプト ─────────────
-          # PerlBridge.executePerl が RUN_PERL_CROSSCHECK=1 の実行時に書き出す
           pl_dir="${PERL_SCRIPT_SAVE_DIR:-ci-out/perl-scripts}"
           pl_count=$(find "$pl_dir" -name "*.pl" 2>/dev/null | wc -l)
           echo ".pl scripts collected: $pl_count"
 
-          # ── .pm: batch-bridge リソース内の Perl モジュール (あれば) ──────
           pm_src="modules/batch-bridge/src/main/resources"
           if find "$pm_src" \( -name "*.pm" -o -name "*.pl" \) -quit 2>/dev/null \
              | grep -q .; then
             find "$pm_src" \( -name "*.pm" -o -name "*.pl" \) \
               -print0 | while IFS= read -r -d '' f; do
-                rel="${f#$pm_src/}"          # perl/Siunertaq/StackMachine.pm
+                rel="${f#$pm_src/}"
                 dest="ci-out/perl/$rel"
                 mkdir -p "$(dirname "$dest")"
                 cp "$f" "$dest"
               done
           fi
 
-          # ── ClickHouse schema SQL ──────────────────────────────────────────
           find . -path "*/resources/clickhouse_schema.sql" \
             -print0 | xargs -0 -I{} cp {} ci-out/schema/
 
