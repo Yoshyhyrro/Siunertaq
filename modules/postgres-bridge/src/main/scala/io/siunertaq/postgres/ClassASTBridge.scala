@@ -108,6 +108,18 @@ object ClassASTBridge:
   //  compileClass (-> MecrispCompiler.compile). Keeping this in one place
   //  avoids a second, independently-drifting implementation of the same
   //  overload-detection logic.
+  // Method-terminating opcodes. These aren't "compute" opcodes at all — they
+  // mark the end of the instruction stream, not a value to translate — so
+  // they're filtered out here rather than reaching opcodeToInstr. Every
+  // javac-compiled method ends with exactly one of these; without this
+  // filter, fail-fast extraction would reject *every* real method on its
+  // own trailing return, which defeats the point of failing fast only on
+  // genuinely unsupported opcodes.
+  private val ReturnOpcodes: Set[Int] = Set(
+    Opcodes.IRETURN, Opcodes.LRETURN, Opcodes.FRETURN,
+    Opcodes.DRETURN, Opcodes.ARETURN, Opcodes.RETURN
+  )
+
   private def scanMethod(
     classBytes:       Array[Byte],
     targetMethod:     String,
@@ -141,7 +153,9 @@ object ClassASTBridge:
                 override def visitIntInsn(opcode: Int, operand: Int): Unit =
                   opcodes += (opcode -> Some(operand))
                 override def visitInsn(opcode: Int): Unit =
-                  opcodes += (opcode -> None)
+                  if !ReturnOpcodes.contains(opcode) then
+                    opcodes += (opcode -> None)
+                  // else: method-terminating opcode, not part of the StackInstr stream
             else null,
         ClassReader.SKIP_FRAMES
       )
