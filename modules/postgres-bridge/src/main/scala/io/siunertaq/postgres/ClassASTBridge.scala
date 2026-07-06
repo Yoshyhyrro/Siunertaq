@@ -156,6 +156,27 @@ object ClassASTBridge:
                   if !ReturnOpcodes.contains(opcode) then
                     opcodes += (opcode -> None)
                   // else: method-terminating opcode, not part of the StackInstr stream
+                override def visitVarInsn(opcode: Int, varIndex: Int): Unit =
+                  opcodes += (opcode -> Some(varIndex))
+                override def visitMethodInsn(opcode: Int, owner: String, name: String, descriptor: String, isInterface: Boolean): Unit =
+                  opcodes += (opcode -> None)
+                override def visitFieldInsn(opcode: Int, owner: String, name: String, descriptor: String): Unit =
+                  opcodes += (opcode -> None)
+                override def visitJumpInsn(opcode: Int, label: org.objectweb.asm.Label): Unit =
+                  opcodes += (opcode -> None)
+                override def visitLdcInsn(value: Any): Unit =
+                  val operand = value match
+                    case i: Integer => Some(i.intValue())
+                    case _          => None
+                  opcodes += (Opcodes.LDC -> operand)
+                override def visitIincInsn(varIndex: Int, increment: Int): Unit =
+                  opcodes += (Opcodes.IINC -> Some(varIndex))
+                override def visitTypeInsn(opcode: Int, typeName: String): Unit =
+                  opcodes += (opcode -> None)
+                override def visitLookupSwitchInsn(dflt: org.objectweb.asm.Label, keys: Array[Int], labels: Array[org.objectweb.asm.Label]): Unit =
+                  opcodes += (Opcodes.LOOKUPSWITCH -> None)
+                override def visitMultiANewArrayInsn(descriptor: String, numDimensions: Int): Unit =
+                  opcodes += (Opcodes.MULTIANEWARRAY -> None)
             else null,
         ClassReader.SKIP_FRAMES
       )

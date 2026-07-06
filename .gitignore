@@ -28,3 +28,5 @@ Thumbs.db
 
 #another
 check.bash
+fix_class_ast_bridge.py
+class_ast_bridge_debug_info.txt
