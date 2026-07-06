@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - bugfix/namespace
+      - release/v0.1.0
     paths:
       - modules/batch-bridge/src/main/resources/perl/**
       - modules/batch-bridge/src/test/resources/perl-version-matrix/**
