@@ -51,9 +51,8 @@ jobs:
       # 3. -Wno-error: Ensure that warnings (implicit declarations, etc.) do not 
       #    terminate the build.
       # 4. -fno-strict-aliasing: Prevent aggressive optimization bugs in legacy pointer casting.
-      COMMON_C_FLAGS: "-std=gnu89 -O1 -fcommon -fno-strict-aliasing -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types -Wno-error"
-      CFLAGS: "${{ env.COMMON_C_FLAGS }}"
-      PERL_MM_OPT: "CCFLAGS='${{ env.COMMON_C_FLAGS }}'"
+      CFLAGS: "-std=gnu89 -O1 -fcommon -fno-strict-aliasing -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types -Wno-error"
+      PERL_MM_OPT: "CCFLAGS='-std=gnu89 -O1 -fcommon -fno-strict-aliasing -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types -Wno-error'"
       
     steps:
       - name: Check out repository
