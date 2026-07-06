@@ -1,0 +1,205 @@
+name: Combined CI (Yices Threshold & Perl Matrix)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - bugfix/namespace
+    paths:
+      - build.sbt
+      - modules/core/**
+      - modules/z3-bridge/**
+      - modules/dhall-bridge/**
+      - modules/batch-bridge/**
+      - modules/yices-bridge/**
+      - examples/**
+      - modules/postgres-bridge/**
+      - .github/workflows/*.yml
+  pull_request:
+    paths:
+      - build.sbt
+      - modules/core/**
+      - modules/z3-bridge/**
+      - modules/dhall-bridge/**
+      - modules/batch-bridge/**
+      - modules/yices-bridge/**
+      - examples/**
+      - modules/postgres-bridge/**
+      - .github/workflows/*.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: combined-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # =========================================================================
+  # Job 1: Yices Threshold & Common Library Build
+  # =========================================================================
+  yices-threshold-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RUN_YICES_SMOKE: "1"
+      YICES_ARTIFACT_DIR: modules/yices-bridge/target/yices-artifacts
+      RUN_PERL_CROSSCHECK: "1"
+      PERL_SCRIPT_SAVE_DIR: ci-out/perl-scripts
+      
+      # --- Legacy C Compatibility Layer ---
+      CFLAGS: "-std=gnu89 -O1 -fcommon -fno-strict-aliasing -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types -Wno-error"
+      PERL_MM_OPT: "CCFLAGS='-std=gnu89 -O1 -fcommon -fno-strict-aliasing -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types -Wno-error'"
+      
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Temurin 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: sbt
+
+      - name: set up sbt
+        uses: sbt/setup-sbt@v1
+
+      - name: Install Yices 2
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common
+          sudo add-apt-repository -y ppa:sri-csl/formal-methods
+          sudo apt-get update
+          sudo apt-get install -y yices2
+
+      - name: Show Yices version
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yices-smt2 --version
+
+      - name: Run CondEvaluator unit tests (pure; no Yices required)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sbt "dhallBridge/testOnly io.siunertaq.batch.CondEvaluatorSpec"
+
+      - name: Run threshold and Yices tests
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sbt \
+            "core/testOnly io.siunertaq.threshold.*"           \
+            "z3Bridge/compile"                                  \
+            "yicesBridge/compile"                               \
+            "batchBridge/compile"                               \
+            "batchBridge/testOnly io.siunertaq.batch.PerlBridgeSpec" \
+            "postgresBridge/compile"                            \
+            "postgresBridge/testOnly io.siunertaq.postgres.*"     \
+            "petersenMzv/compile"                              \
+            "yicesBridge/testOnly io.siunertaq.yicesbridge.*"
+
+      - name: Package common library JARs
+        if: success()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sbt \
+            "core/package"             \
+            "batchBridge/package"      \
+            "postgresBridge/package"
+
+      - name: Collect common library artifacts
+        if: success()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p ci-out/schema ci-out/perl-scripts
+
+          for mod in core batch-bridge postgres-bridge; do
+            src="modules/$mod/target"
+            dest="ci-out/jars/$mod"
+            mkdir -p "$dest"
+            find "$src" -maxdepth 3 -name "*.jar" \
+              ! -name "*-sources.jar"              \
+              ! -name "*-javadoc.jar"              \
+              -print0 | xargs -0 -I{} cp {} "$dest/"
+          done
+
+          for mod in core batch-bridge postgres-bridge; do
+            find "modules/$mod/target" -name "*.class" -path "*/classes/io/*" \
+              -print0 | while IFS= read -r -d '' f; do
+                rel="${f##*/classes/}"
+                dest="ci-out/classes/$mod/$rel"
+                mkdir -p "$(dirname "$dest")"
+                cp "$f" "$dest"
+              done
+          done
+
+          pl_dir="${PERL_SCRIPT_SAVE_DIR:-ci-out/perl-scripts}"
+          pl_count=$(find "$pl_dir" -name "*.pl" 2>/dev/null | wc -l)
+          echo ".pl scripts collected: $pl_count"
+
+          pm_src="modules/batch-bridge/src/main/resources"
+          if find "$pm_src" \( -name "*.pm" -o -name "*.pl" \) -quit 2>/dev/null \
+             | grep -q .; then
+            find "$pm_src" \( -name "*.pm" -o -name "*.pl" \) \
+              -print0 | while IFS= read -r -d '' f; do
+                rel="${f#$pm_src/}"
+                dest="ci-out/perl/$rel"
+                mkdir -p "$(dirname "$dest")"
+                cp "$f" "$dest"
+              done
+          fi
+
+          find . -path "*/resources/clickhouse_schema.sql" \
+            -print0 | xargs -0 -I{} cp {} ci-out/schema/
+
+          echo "=== ci-out layout ==="
+          find ci-out -type f | sort
+
+      - name: Upload common library
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: siunertaq-common-library-${{ github.sha }}
+          path: ci-out/
+          if-no-files-found: warn
+
+      - name: Upload Yices artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yices-threshold-artifacts
+          path: modules/yices-bridge/target/yices-artifacts
+          if-no-files-found: ignore
+
+  # =========================================================================
+  # Job 2: Perl Cross-Version Round-Trip Check
+  # =========================================================================
+  perl-round-trip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run producer/consumer round-trip matrix
+        working-directory: modules/batch-bridge/src/test/resources/perl-version-matrix
+        run: ./run.sh
+
+      - name: Show container logs on failure
+        if: failure()
+        working-directory: modules/batch-bridge/src/test/resources/perl-version-matrix
+        run: docker compose logs || true
+
+      - name: Upload fixture JSON on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perl-round-trip-fixtures-${{ github.sha }}
+          path: modules/batch-bridge/src/test/resources/perl-version-matrix/fixtures/out
+          if-no-files-found: warn
