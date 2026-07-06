@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - hotfix/namespace
+      - bugfix/namespace
     paths:
       - build.sbt
       - modules/core/**
