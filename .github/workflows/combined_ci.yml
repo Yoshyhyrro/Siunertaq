@@ -55,6 +55,25 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Install alr (Alire) on Linux runners
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "x86_64" ]; then
+            URL="https://github.com/alire-project/alire/releases/download/v2.1.1/alr-2.1.1-bin-x86_64-linux.zip"
+            sudo apt-get update
+            sudo apt-get install -y unzip curl
+            curl -fsSL "$URL" -o /tmp/alr.zip
+            mkdir -p /tmp/alr && unzip -o /tmp/alr.zip -d /tmp/alr
+            sudo mv /tmp/alr/alr /usr/local/bin/alr || sudo mv /tmp/alr/*/alr /usr/local/bin/alr || true
+            sudo chmod +x /usr/local/bin/alr
+            /usr/local/bin/alr --version || true
+          else
+            echo "alr install skipped: arch=$ARCH"
+          fi
+
       - name: Set up Temurin 17
         uses: actions/setup-java@v4
         with:
