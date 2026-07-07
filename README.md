@@ -1,7 +1,8 @@
 # Siunertaq
 
-![Yices Threshold CI](https://github.com/Yoshyhyrro/Siunertaq/actions/workflows/yices_test_ci.yml/badge.svg)
-![Release](https://github.com/Yoshyhyrro/Siunertaq/actions/workflows/release.yml/badge.svg)
+[![Yices Threshold CI](https://img.shields.io/github/actions/workflow/status/Yoshyhyrro/Siunertaq/yices_test_ci.yml?label=Yices%20Threshold%20CI)](https://github.com/Yoshyhyrro/Siunertaq/actions)
+[![Combined CI](https://img.shields.io/github/actions/workflow/status/Yoshyhyrro/Siunertaq/combined_ci.yml?label=Combined%20CI)](https://github.com/Yoshyhyrro/Siunertaq/actions)
+[![Release](https://img.shields.io/github/actions/workflow/status/Yoshyhyrro/Siunertaq/release.yml?label=Release)](https://github.com/Yoshyhyrro/Siunertaq/actions)
 
 *ᓯᐅᓇᕐᑕᖅ — Inuktitut for "that which lies ahead; a purpose"*
 
@@ -13,6 +14,7 @@ The repository combines:
 - a `yices-bridge` module for Yices 2 SMT cross-checking,
 - a `dhall-bridge` module for total Dhall input evaluation via `cats-effect`,
 - a `batch-bridge` module for JCL-inspired step orchestration via Apache Pekko and Spring Batch,
+- a `postgres-bridge` module for JVM/Forth bytecode auditing, a PostgreSQL/ClickHouse analytics backend, and cross-language (JVM ↔ Perl) canonical naming,
 - a `petersen-mzv` module for MZV depth-3 reduction on the Petersen graph with full SMT verification, and
 - a planned `mlir-bridge` module for future MLIR integration.
 
@@ -20,11 +22,12 @@ The repository combines:
 
 | Module | Role | Key Types |
 |---|---|---|
-| `core` | BSD quiver, Golay lattice, arithmetic IR, threshold AST | `BSDArrow`, `GolayWeight`, `PhantomCarabiner`, `Expr` |
+| `core` | BSD quiver, Golay lattice, arithmetic IR, threshold AST, canonical StackInstr JSON codec | `BSDArrow`, `GolayWeight`, `PhantomCarabiner`, `Expr`, `NamespaceCanon` |
 | `z3-bridge` | Z3 JNI Banach constraint solver | `BanachConstraintSolver` |
 | `yices-bridge` | Yices 2 SMT cross-check lane + smoke tests | `YicesThresholdSolver`, `YicesSmtLib` |
 | `dhall-bridge` | Dhall → JSON → Scala batch job decoder | `BatchJobDef`, `CondEvaluator`, `DhallBatchRegistry` |
 | `batch-bridge` | JCL/JES2-style Pekko + Spring Batch orchestration | `JobSupervisorActor`, `StepExecutorActor`, `StackMachineTasklet`, `PerlBridge` |
+| `postgres-bridge` | JVM bytecode → Forth compilation, PostgreSQL audit log, ClickHouse analytics | `ClassASTBridge`, `MecrispCompiler`, `ClickHouseSync` |
 | `petersen-mzv` | MZV depth-3 reduction on the Petersen phase graph | `PetersenFluidMachine`, `ImaginaryPopperActor`, `MZVMachineBean` |
 | `mlir-bridge` | *(planned)* MLIR / Affine Dialect integration | — |
 
@@ -169,6 +172,8 @@ Siunertaq builds a **language-agnostic stack machine IR** that evaluates the sam
 
 Cross-language correctness is verified by `PerlBridge` (`RUN_PERL_CROSSCHECK=1`): Scala JVM and Perl evaluate the same `Program` independently, and any divergence immediately sets `ExitStatus.FAILED`. The same pattern extends to further language backends.
 
+At the analytics layer, `NamespaceCanon` (`core`) folds a JVM `(class, method)` pair and a Perl `(package, sub)` pair down to the same neutral `canonical_name` key (e.g. `expr.program.to_json`), so ClickHouse can join JVM- and Perl-origin rows on that key via the `cross_language_equivalences` view once a Perl-side bridge populates it.
+
 ---
 
 Build systems are directed graphs. So are Banach spaces with norm-compatible maps. Siunertaq exploits this overlap by modelling build dependencies as arrows in a *BSD quiver* — a directed graph whose vertices carry norm bounds and whose arrows are typed by their role:
@@ -284,6 +289,7 @@ The two bridges are deliberately kept at arm's length: `z3-bridge` links against
 - `dhall-to-json` on `$PATH` for `dhall-bridge` and `batch-bridge` evaluation
 - `z3` on `$PATH` (or via `Z3_PATH`) for optional MZV SMT smoke tests (`RUN_MZV_SMT_SMOKE=1`)
 - `perl` on `$PATH` (optional) for `PerlBridge` Scala/Perl differential testing (`RUN_PERL_CROSSCHECK=1`); Ubuntu: `sudo apt install perl`, Windows: [Strawberry Perl](https://strawberryperl.com/)
+- PostgreSQL and ClickHouse 24.x (optional) for `postgres-bridge`'s audit log and analytics backend; see `modules/postgres-bridge/extension/clickhouse_schema.sql` and `clickhouse_schema_v2_canonical_name.sql`
 
 ## Build
 
@@ -322,12 +328,15 @@ modules/
   core/
     src/main/scala/io/siunertaq/
       BSDQuiver.scala         — BSDArrow (phantom-typed quiver), BSDVertex, FVRole, DP state, BSDQuiverManager
+      NamespaceCanon.scala    — folds JVM class/method and Perl package/sub names to one canonical
+                                cross-language key (fromJvm, fromPerl, suggestPerlPackage/Sub)
       MachineConstants.scala  — galoisHeight (log), octadHeight (linear), CarabinerHeight typeclass,
                                 machineEpsilonReal, valuationDepth, arikiKoike{N,R}, M₂₄ rigid triple
       carabiner/              — GolayWeight extensions, SpaceTag, Carabiner, Route, golayRoute,
                                 ComplexWeight (opaque), PhantomCarabiner, PhantomCarabinerRef (opaque)
       yangbaxter/             — SpiralRotation, spiralToSpectralParam, spectralRMatrix, BraidWord
-      expr/                   — arithmetic ADTs, a stack-machine lowering, evaluator, and S-expression codec
+      expr/                   — arithmetic ADTs, a stack-machine lowering, evaluator, S-expression codec,
+                                and the canonical StackInstr JSON codec (Program.toJson / Decoder[Instr])
       threshold/              — constraint AST, canonical S-expression support, solver input generation
   z3-bridge/          — Z3-backed Banach constraint verification (JNI)
   yices-bridge/       — Yices 2 cross-check lane (subprocess) + smoke tests
@@ -337,7 +346,20 @@ modules/
     src/main/scala/io/siunertaq/
       dhall/          — DhallEffectRegistry: Dhall → IO effect registration
       batch/          — BatchJobDef, DhallBatchRegistry, CondEvaluator
-  batch-bridge/       — Spring Batch + Pekko JES2; StackMachineTasklet, StepExecutorActor, JobSupervisorActor, PerlBridge (OS-aware Perl cross-validation)
+  batch-bridge/
+    src/main/resources/perl/
+      Siunertaq/StackMachine.pm — Perl mirror of expr.Program; executes the shared StackInstr JSON via JSON::PP
+    src/main/scala/io/siunertaq/batch/
+                        — StackMachineTasklet, StepExecutorActor, JobSupervisorActor,
+                          PerlBridge (OS-aware Perl cross-validation, RUN_PERL_CROSSCHECK=1)
+  postgres-bridge/
+    extension/
+      clickhouse_schema.sql                  — bytecode_instructions, forth_words, mzv_triple_stream, and analytics views
+      clickhouse_schema_v2_canonical_name.sql — adds canonical_name to bytecode_instructions/forth_words,
+                                                 cross_language_equivalences VIEW, canonical_opcode_frequency_mv
+    src/main/scala/io/siunertaq/postgres/
+                        — ClassASTBridge (.class → StackInstr JSON, fail-fast on unsupported opcodes),
+                          ClickHouseSync (CDC mirror; injects NamespaceCanon.fromJvm as canonical_name)
   mlir-bridge/        — planned MLIR / Affine Dialect integration
 examples/
   petersen-mzv/
@@ -352,8 +374,12 @@ examples/
       PetersenSMTLibSpec.scala  — unit + smoke tests for the SMT generator
   mzv_enterprise_carabiner_system.scala  — standalone demonstration
 .github/workflows/
-  yices_test_ci.yml   — CI: installs Yices 2, runs threshold + solver + CondEvaluator tests
-  release.yml         — Release: tag push → full test → sbt package → GitHub Release
+  yices_test_ci.yml         — CI: installs Yices 2, runs threshold + solver + CondEvaluator tests,
+                              packages core/batch-bridge/postgres-bridge JARs on success
+  combined_ci.yml           — CI: Yices threshold lane + Perl round-trip lane in one pipeline,
+                              uploads a shared siunertaq-common-library artifact
+  perl_version_matrix_ci.yml — CI: producer/consumer round-trip check across Perl versions via Docker Compose
+  release.yml               — Release: tag push → full test → sbt package → GitHub Release
 ```
 
 ---
@@ -361,8 +387,11 @@ examples/
 ## Release Notes
 
 See the [GitHub Releases](../../releases) page for the full changelog.
-The most recent release is **[v0.1.0-beta.3](../../releases/tag/v0.1.0-beta.3)** —
-shared StackInstr JSON, `Siunertaq::StackMachine.pm`, and full `PerlBridgeSpec` green (32/32).
+The most recent release is **[v0.1.0](../../releases/tag/v0.1.0)** —
+`NamespaceCanon` cross-language canonical naming, a `canonical_name` column and
+`cross_language_equivalences` VIEW in ClickHouse, and a fail-fast overhaul of
+`ClassASTBridge` (unsupported opcodes and ambiguous overloads now raise, rather
+than silently degrading the extracted result).
 
 ## Current status
 
@@ -376,12 +405,14 @@ shared StackInstr JSON, `Siunertaq::StackMachine.pm`, and full `PerlBridgeSpec` 
 - `CondEvaluatorSpec` covers all six `CondOp` variants with boundary values; runs in CI without any external tools.
 - Automated release workflow publishes per-module JARs to GitHub Releases on version tag push.
 - `petersen-mzv` compiles cleanly: `PetersenFluidMachine` implements Furusho's pentagon coherence as a typed Scala 3 Cats Effect pipeline; `ImaginaryPopperActor` handles IKZ-style regularization of divergent triples ($s_1 = 1$); full SMT suite P1–P7 passes on `z3`.
-- `postgres-bridge`: ClickHouse 24.x analytics backend operational; CDC pipeline (`mzv_triple_stream`, `bytecode_instructions`, `forth_words`) ready for production ingestion.
+- `postgres-bridge`: ClickHouse 24.x analytics backend operational; CDC pipeline (`mzv_triple_stream`, `bytecode_instructions`, `forth_words`) ready for production ingestion. `bytecode_instructions` and `forth_words` now carry a `canonical_name` column, and the `cross_language_equivalences` VIEW surfaces names implemented in both JVM and Perl once a Perl-side bridge populates it (JVM-only today).
+- `NamespaceCanon` (`core`) computes the JVM ↔ Perl `canonical_name` join key (e.g. `expr.program.to_json`), consumed by `ClickHouseSync` at the JSON-serialization boundary; covered by `NamespaceCanonSpec`.
+- `ClassASTBridge` now fails fast: an unsupported opcode raises `UnsupportedBytecodeException` and an ambiguous overload raises `OverloadedMethodException` (pass `targetDescriptor` to disambiguate), rather than silently dropping or conflating instructions. The new `compileClass` entry point returns a full `CompilationResult` (words, rows, file hash); covered by `ClassASTBridgeSpec` against `javac`-compiled fixtures.
 - `carabiner/` package formalises the Golay lattice (five weight classes, self-dual route, M₂₄ 8A orbit match) and lifts it to a complex Berkovich evaluation layer via `PhantomCarabiner`.
 - `opaque type ComplexWeight` and `opaque type PhantomCarabinerRef` hide implementation details behind algebra-preserving APIs; `berryPhaseAngle` and `weightNormSq` are the only exposed gauge-invariant observables.
 - `MachineConstants` separates the logarithmic `galoisHeight` (GIT semistability mask) from the linear `octadHeight` (Berkovich tree position) and grounds the tower in IEEE 754 via `machineEpsilonReal = 2⁻⁵²` and `valuationDepth = 52`.
 - `YangBaxterBanach` supplies the Satake spectral parameter bridge (`SpiralRotation → spiralToSpectralParam → PhantomCarabiner`) and the rational GL₂ R-matrix.
-- v0.1.0-beta.3: all five active modules (`core`, `z3Bridge`, `yicesBridge`, `batchBridge`, `petersenMzv`) compile cleanly; `PerlBridgeSpec` 32/32 green including Perl subprocess integration.
+- v0.1.0: all active modules (`core`, `z3Bridge`, `yicesBridge`, `batchBridge`, `postgresBridge`, `petersenMzv`) compile cleanly; `PerlBridgeSpec` 32/32 green including Perl subprocess integration.
 
 ## Future work
 
@@ -390,6 +421,7 @@ shared StackInstr JSON, `Siunertaq::StackMachine.pm`, and full `PerlBridgeSpec` 
 - Yices-verified norm thresholds wired directly into `StepExecutorActor` pre-conditions, so a step that would violate a BSD norm bound is rejected before Spring Batch ever runs it
 - `mlir-bridge`: map `BSDArrow` decompositions to MLIR Affine Dialect norm constraints, JIT via LLVM IR
 - Language bridge expansion: extend the `PerlBridge` pattern to **Portable Ruby** (mruby or CRuby `--with-static-stdlib`) as the next cross-validation target; unify `PerlBackend` and `RubyBackend` under a `ScriptBackend` trait so `toPerlScript` / `toRubyScript` share one generator
+- `PmASTBridge`: a Perl-side counterpart to `ClassASTBridge` that writes `forth_words` rows tagged `language = 'perl'`, so `cross_language_equivalences` can actually surface JVM/Perl pairs instead of JVM-only rows
 - ClickHouse: additional materialised views for per-step latency distribution and cross-language divergence tracking (cases where `MISMATCH` was logged)
 - `postgres-bridge`: wire `mzv_triple_log` PostgreSQL audit table directly into the Pekko supervision tree so every `ImaginaryPopperActor` regularization event is immutably recorded (ClickHouse CDC mirror `mzv_triple_stream` is complete; direct actor-tree wiring is pending)
 - `batchBridge` residual warnings: `ActorProtocol.scala` (`ActorRef` unused import), `JobSupervisorActor.scala` (`Terminated(_)` pattern variable), `MZVMachineBean.scala` (`unsafeRunSync`/`unsafeToFuture` → `using`), `PetersenSmtSolver.scala` (`Files.writeString` return discarded)
