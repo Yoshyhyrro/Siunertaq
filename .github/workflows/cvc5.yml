@@ -28,4 +28,4 @@ jobs:
           cvc5 register_machine.smt2
 
           echo "=== Let-Collapse via Galois Height Theory & Octad Weights ==="
-          cvc5 let_collapse_galois_height.smt2
+          cvc5 let_collapse_v4.smt2
