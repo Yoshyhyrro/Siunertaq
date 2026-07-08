@@ -94,7 +94,7 @@
          (ite (is_stable_domain combined)
               combined
               (dimensional_collapse_op combined)))
-       (eval_functor (letBody e) (store env (letName e) (eval_functor (letVal e) env)))))))
+       (eval_functor (letBody e) (store env (letName e) (eval_functor (letVal e) env))))))))
 
 ;; ============================================================================
 ;; 6. Verification: Stability via Braid Bundle Holonomy
