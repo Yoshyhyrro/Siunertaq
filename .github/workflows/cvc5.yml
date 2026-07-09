@@ -19,14 +19,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cvc5
 
-      - name: Install Alt-Ergo
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y opam
-          opam init --disable-sandboxing -y
-          eval $(opam env)
-          opam install -y alt-ergo
-
       - name: Run SMT Verification
         run: |
           echo "=== Verifying Stack Machine (c2 U c2 Trap) ==="
@@ -36,5 +28,4 @@ jobs:
           cvc5 register_machine.smt2
 
           echo "=== Let-Collapse via Galois Height Theory & Octad Weights ==="
-          eval $(opam env)
-          alt-ergo let_collapse_v5.smt2
+          cvc5 let_collapse_v5.smt2
