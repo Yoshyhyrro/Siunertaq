@@ -1,7 +1,12 @@
 (set-logic ALL)
 (set-option :produce-models true)
-(set-option :tlimit 7200000) ;; Safety net: 2 hours (though expected to finish in seconds)
+(set-option :tlimit 7200000)
 
+;; ============================================================================
+;; Standard Solvers Array & Datatype Optimization Options
+;; ============================================================================
+(set-option :arrays-weak-equiv true)
+(set-option :dt-share-sel true)
 ;; ============================================================================
 ;; 1. Formal Specification of the Abstract Syntax Tree (AST)
 ;; ============================================================================
