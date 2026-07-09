@@ -158,6 +158,9 @@
 ;; --------------------------------------------------------------------------
 (declare-fun theta_link_crystal (FCrystal) FCrystal)
 
+;; Explicit definition of the Theta-link on integer invariants (Monodromy involution)
+(define-fun theta_link_int ((x Int)) Int (- 17 x))
+
 ;; Axiom 8: Crystalline Collapse via Verschiebung-Theta Monodromy
 (assert (forall ((c FCrystal))
   (=> (and (>= (filtration_depth c) 9) (<= (filtration_depth c) 16))
