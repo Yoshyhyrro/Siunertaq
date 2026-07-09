@@ -150,7 +150,7 @@
 ;; --------------------------------------------------------------------------
 ;; 7.3 Verschiebung Endomorphism (V)
 ;; --------------------------------------------------------------------------
-(define-fun Rec verschiebung ((c FCrystal)) FCrystal
+(define-fun-rec verschiebung ((c FCrystal)) FCrystal
   (FCrystalExpr (crystal_e c) (+ (filtration_depth c) 1) (slope c)))
 
 ;; --------------------------------------------------------------------------
@@ -190,6 +190,7 @@
 (assert (forall ((c1 FCrystal) (c2 FCrystal))
   (= (to_z_center (combine (filtration_depth c1) (filtration_depth c2)))
      (Ext1_group c1 c2))))
+
 
 ;; --------------------------------------------------------------------------
 ;; 8.1 Lattice as product of Clebsch vertices
@@ -234,13 +235,14 @@
       (not (face_stabilizer l))))
 
 ;; Axiom 9: Anyonic excitation is reversible via closed loop
+(declare-fun theta_link_lattice (Lattice) Lattice)
+(declare-fun verschiebung_lattice (Lattice) Lattice)
+
 (assert (forall ((l Lattice))
-  (==> (anyon_excitation l)
+  (=> (anyon_excitation l)
        (exists ((l_prime Lattice))
          (and (ground_state l_prime)
-              (= (verschiebung (theta_link_crystal ((as const FCrystal) (FCrystalExpr (ArgV 0) 0))))
-                 ((as const FCrystal) (FCrystalExpr (ArgV 0) 0))))))))
-
+              (= (verschiebung_lattice (theta_link_lattice l)) l_prime))))))
 ;; --------------------------------------------------------------------------
 ;; 9.1 Exponential blow-up (k=0..6)
 ;; --------------------------------------------------------------------------
