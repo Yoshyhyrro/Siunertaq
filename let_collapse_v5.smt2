@@ -95,7 +95,7 @@
 ;; control, ensuring constant-time verification regardless of AST depth.
 
 (define-fun-rec eval_functor ((e Expr) (env (Array Int Int))) Int
-  (ite (is-ConstScalar e) 1
+  (ite (is_ConstScalar e) 1
   (ite (is-ArgV e) 1
   (ite (is-VarV e) (select env (varName e))
   (ite (is-AddE e)
