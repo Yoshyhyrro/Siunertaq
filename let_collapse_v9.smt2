@@ -194,7 +194,7 @@
 ;; --------------------------------------------------------------------------
 ;; 8.1 Lattice Structure as product of Clebsch vertices
 ;; --------------------------------------------------------------------------
-;; Defined with explicit selectors inside the algebraic datatype to prevent double binding.
+;; Define constructors with strict binding names for smooth pattern matching.
 
 (declare-sort CrystallineVertex 0)
 (declare-fun v_depth (CrystallineVertex) Int)
@@ -215,14 +215,15 @@
 ;; --------------------------------------------------------------------------
 ;; 8.3 Face stabilizer: phase compatibility (Frobenius dual)
 ;; --------------------------------------------------------------------------
-;; Using the datatype selectors f_edge_from and f_edge_to for projection.
+;; Replaced the illegal SMT-LIB wildcards '_' with proper symbolic variables to fix the parse error.
 
 (define-fun face_stabilizer ((l Lattice)) Bool
   (match l
     (((FaceNode f_from f_to) 
-       (= (match f_from (((EdgeNode _ _ p1) p1) (_ 0)))
-          (match f_to   (((EdgeNode _ _ p2) p2) (_ 0)))))
-     (_ true))))
+       (= (match f_from (((EdgeNode src1 dst1 p1) p1) ((VertexNode vn1) 0) ((FaceNode fn1 fn2) 0)))
+          (match f_to   (((EdgeNode src2 dst2 p2) p2) ((VertexNode vn2) 0) ((FaceNode fn3 fn4) 0)))))
+     ((EdgeNode src0 dst0 p0) true)
+     ((VertexNode vn0) true))))
 
 ;; --------------------------------------------------------------------------
 ;; 8.4 Ground state: all stabilizers satisfied
