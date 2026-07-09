@@ -101,12 +101,12 @@
      ((VarV varName) (select env varName))
      ((AddE addL addR)
       (let ((wl (eval_functor addL env))
-            (wr (eval_functor addR env))
-            (combined (combine wl wr)))
-        (verschiebung_op combined)))
+            (wr (eval_functor addR env)))
+        (let ((combined (combine wl wr)))
+          (verschiebung_op combined))))
      ((LetE letName letVal letBody)
       (eval_functor letBody (store env letName (eval_functor letVal env)))))))
-      
+            
 ;; ============================================================================
 ;; 6. Verification: Structural Stability via Topological Invariants
 ;; ============================================================================
