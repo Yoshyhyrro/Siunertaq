@@ -191,25 +191,30 @@
   (= (to_z_center (combine (filtration_depth c1) (filtration_depth c2)))
      (Ext1_group c1 c2))))
 
+;; --------------------------------------------------------------------------
+;; 8.1 Lattice Structure as product of Clebsch vertices
+;; --------------------------------------------------------------------------
+;; Define Vertex and Lattice component sorts explicitly to fix the sort mismatch.
 
-;; --------------------------------------------------------------------------
-;; 8.1 Lattice as product of Clebsch vertices
-;; --------------------------------------------------------------------------
+(declare-sort CrystallineVertex 0)
+(declare-fun v_depth (CrystallineVertex) Int)
+(declare-fun vertex_stabilizer (CrystallineVertex) Bool)
 
 (declare-datatypes ((Lattice 0))
-  (((Vertex (v_id Int) (v_depth Int))
-    (Edge   (e_from Int) (e_to Int) (e_phase Int))
-    (Face   (f_edge_from Lattice) (f_edge_to Lattice)))))
+  (((VertexNode (v_node CrystallineVertex))
+    (EdgeNode   (e_from Int) (e_to Int) (e_phase Int))
+    (FaceNode   (f_edge_from Lattice) (f_edge_to Lattice)))))
 
 (declare-fun edge_from (Lattice) Lattice)
 (declare-fun edge_to (Lattice) Lattice)
+(declare-fun e_phase (Lattice) Int)
 
 ;; --------------------------------------------------------------------------
 ;; 8.2 Vertex stabilizer: filtration depth bound
 ;; --------------------------------------------------------------------------
 
-(define-fun vertex_stabilizer ((v Vertex)) Bool
-  (<= (v_depth v) 8))
+(assert (forall ((v CrystallineVertex))
+  (= (vertex_stabilizer v) (<= (v_depth v) 8))))
 
 ;; --------------------------------------------------------------------------
 ;; 8.3 Face stabilizer: phase compatibility (Frobenius dual)
@@ -223,7 +228,7 @@
 ;; --------------------------------------------------------------------------
 
 (define-fun ground_state ((l Lattice)) Bool
-  (and (forall ((v Vertex)) (vertex_stabilizer v))
+  (and (forall ((v CrystallineVertex)) (vertex_stabilizer v))
        (face_stabilizer l)))
 
 ;; --------------------------------------------------------------------------
@@ -231,7 +236,7 @@
 ;; --------------------------------------------------------------------------
 
 (define-fun anyon_excitation ((l Lattice)) Bool
-  (or (exists ((v Vertex)) (not (vertex_stabilizer v)))
+  (or (exists ((v CrystallineVertex)) (not (vertex_stabilizer v)))
       (not (face_stabilizer l))))
 
 ;; Axiom 9: Anyonic excitation is reversible via closed loop
@@ -243,6 +248,8 @@
        (exists ((l_prime Lattice))
          (and (ground_state l_prime)
               (= (verschiebung_lattice (theta_link_lattice l)) l_prime))))))
+
+
 ;; --------------------------------------------------------------------------
 ;; 9.1 Exponential blow-up (k=0..6)
 ;; --------------------------------------------------------------------------
@@ -295,7 +302,7 @@
 (echo "=== Theorem 4: For all x in Clebsch, V(Theta(V(Theta(x)))) = 17 ===")
 (declare-const test_x Int)
 (assert (is_clebsch test_x))
-(assert (not (= (theta_link_int (theta_link_int test_x)) test_x)))
+(assert (not (= (theta_link_int test_x) (- 17 test_x))))
 (check-sat)
 
 ;; --------------------------------------------------------------------------
@@ -318,6 +325,7 @@
 (echo "=== Theorem 6: anyonic excitation can be recovered to ground state ===")
 (declare-const l Lattice)
 (assert (anyon_excitation l))
+(assert (not (ground_state (verschiebung_lattice (theta_link_lattice l)))))
 (check-sat)
 
 ;; --------------------------------------------------------------------------
