@@ -194,7 +194,7 @@
 ;; --------------------------------------------------------------------------
 ;; 8.1 Lattice Structure as product of Clebsch vertices
 ;; --------------------------------------------------------------------------
-;; Define Vertex and Lattice component sorts explicitly to fix the sort mismatch.
+;; Defined with explicit selectors inside the algebraic datatype to prevent double binding.
 
 (declare-sort CrystallineVertex 0)
 (declare-fun v_depth (CrystallineVertex) Int)
@@ -204,10 +204,6 @@
   (((VertexNode (v_node CrystallineVertex))
     (EdgeNode   (e_from Int) (e_to Int) (e_phase Int))
     (FaceNode   (f_edge_from Lattice) (f_edge_to Lattice)))))
-
-(declare-fun edge_from (Lattice) Lattice)
-(declare-fun edge_to (Lattice) Lattice)
-(declare-fun e_phase (Lattice) Int)
 
 ;; --------------------------------------------------------------------------
 ;; 8.2 Vertex stabilizer: filtration depth bound
@@ -219,9 +215,14 @@
 ;; --------------------------------------------------------------------------
 ;; 8.3 Face stabilizer: phase compatibility (Frobenius dual)
 ;; --------------------------------------------------------------------------
+;; Using the datatype selectors f_edge_from and f_edge_to for projection.
 
 (define-fun face_stabilizer ((l Lattice)) Bool
-  (= (e_phase (edge_from l)) (e_phase (edge_to l))))
+  (match l
+    (((FaceNode f_from f_to) 
+       (= (match f_from (((EdgeNode _ _ p1) p1) (_ 0)))
+          (match f_to   (((EdgeNode _ _ p2) p2) (_ 0)))))
+     (_ true))))
 
 ;; --------------------------------------------------------------------------
 ;; 8.4 Ground state: all stabilizers satisfied
@@ -248,7 +249,6 @@
        (exists ((l_prime Lattice))
          (and (ground_state l_prime)
               (= (verschiebung_lattice (theta_link_lattice l)) l_prime))))))
-
 
 ;; --------------------------------------------------------------------------
 ;; 9.1 Exponential blow-up (k=0..6)
