@@ -95,17 +95,18 @@
 ;; control, ensuring constant-time verification regardless of AST depth.
 
 (define-fun-rec eval_functor ((e Expr) (env (Array Int Int))) Int
-  (ite (is-ConstScalar e) 1
-  (ite (is-ArgV e) 1
-  (ite (is-VarV e) (select env (varName e))
-  (ite (is-AddE e)
-       (let ((wl (eval_functor (addL e) env))
-             (wr (eval_functor (addR e) env))
-             (combined (combine wl wr)))
-         ;; Apply Verschiebung to control arithmetic height (Galois height)
-         (verschiebung_op combined))
-       (eval_functor (letBody e) (store env (letName e) (eval_functor (letVal e) env))))))))
-       
+  (match e
+    (((ConstScalar csN) 1)
+     ((ArgV argIdx) 1)
+     ((VarV varName) (select env varName))
+     ((AddE addL addR)
+      (let ((wl (eval_functor addL env))
+            (wr (eval_functor addR env))
+            (combined (combine wl wr)))
+        (verschiebung_op combined)))
+     ((LetE letName letVal letBody)
+      (eval_functor letBody (store env letName (eval_functor letVal env)))))))
+      
 ;; ============================================================================
 ;; 6. Verification: Structural Stability via Topological Invariants
 ;; ============================================================================
