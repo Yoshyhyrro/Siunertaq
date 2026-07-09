@@ -106,7 +106,7 @@
           (verschiebung_op combined))))
      ((LetE letName letVal letBody)
       (eval_functor letBody (store env letName (eval_functor letVal env)))))))
-            
+
 ;; ============================================================================
 ;; 6. Verification: Structural Stability via Topological Invariants
 ;; ============================================================================
@@ -120,8 +120,9 @@
        (ArgV 0)
        (LetE k (chain (- k 1)) (AddE (VarV k) (VarV k)))))
 
-;; Initialize environment in the Pure Imaginary stratum to activate Θ-link.
-(define-fun pureImagEnv () (Array Int Int) ((as const (Array Int Int)) 17))
+;; Stratum Initialization via Monolithic Direct Mapping
+(declare-fun pureImagEnv () (Array Int Int))
+(assert (forall ((i Int)) (= (select pureImagEnv i) 1)))
 
 (declare-const targetExpr Expr)
 (assert (= targetExpr (chain 50)))
