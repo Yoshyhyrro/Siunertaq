@@ -21,7 +21,8 @@ jobs:
       - name: Install Alt-Ergo
         run: |
           sudo apt-get update
-          sudo apt-get install -y alt-ergo
+          sudo apt-get install -y opam
+          opam install -y alt-ergo
 
       - name: Run SMT Verification
         run: |
@@ -32,5 +33,6 @@ jobs:
           cvc5 register_machine.smt2
 
           echo "=== Let-Collapse via Galois Height Theory & Octad Weights ==="
+          eval $(opam env)
           alt-ergo let_collapse_v5.smt2
           
