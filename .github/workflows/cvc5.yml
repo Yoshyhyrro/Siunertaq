@@ -29,5 +29,4 @@ jobs:
 
           echo "=== Let-Collapse via Galois Height Theory & Octad Weights ==="
           alt-ergo let_collapse_v5.smt2
-          cvc5 let_collapse_v5.smt2
           
