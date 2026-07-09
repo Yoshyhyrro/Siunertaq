@@ -17,7 +17,11 @@ jobs:
       - name: Install cvc5
         run: |
           sudo apt-get update
-          sudo apt-get install -y cvc5 alt-ergo
+          sudo apt-get install -y cvc5
+      - name: Install Alt-Ergo
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y alt-ergo
 
       - name: Run SMT Verification
         run: |
