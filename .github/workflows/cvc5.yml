@@ -31,4 +31,4 @@ jobs:
           cvc5 --tlimit=60000 --stats let_collapse_v5.smt2
       
           echo "=== Let-Collapse via Hecke-Equivariant Oka-Grauert & Borel-Weil-Bott (d=5,6) ==="
-          cvc5 --tlimit=60000 --stats let_collapse_v9.smt2
+          cvc5 --finite-model-find --tlimit=60000 --stats let_collapse_v9.smt2
