@@ -1,4 +1,5 @@
 (set-logic ALL)
+(set-option :incremental true)
 (set-option :produce-models true)
 (set-option :tlimit 7200000)
 
