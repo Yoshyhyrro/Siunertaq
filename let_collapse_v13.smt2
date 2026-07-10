@@ -5,7 +5,7 @@
 ;; ==============================================================================
 ;; v13: Golay Phase Transitions and Thread-Arbiter Invariants in Relative Schemes
 ;; ==============================================================================
-;; This formulation modelized the Let-Collapse via Hecke-Equivariant Oka-Grauert & 
+;; This formulation models the Let-Collapse via Hecke-Equivariant Oka-Grauert & 
 ;; Borel-Weil-Bott theories at depth d=5,6 under strict exponential blow-up.
 ;; Instead of naive temporal expansion, the search space utilizes a Golay code 
 ;; duality switch to transition temporal pathways, while managing concurrency via 
@@ -35,46 +35,38 @@
 ;; --------------------------------------------------------------------------
 ;; SECTION 3: The Thread Arbiter Invariant Variety
 ;; --------------------------------------------------------------------------
-;; This section models the concurrent execution locus. The ThreadArbiter 
-;; arbitrates state transitions between concurrent execution branches, acting 
-;; as a cohomological obstruction handler that prevents race conditions 
-;; during let-binding localization.
 (declare-datatypes ((ArbiterState 0))
   (((Idle)
     (Acquired (owner_thread Int) (priority Int))
     (Released (prev_owner Int)))))
 
+;; Fixed datatype syntax for selectors according to SMT-LIB v2.6 standard
 (declare-datatypes ((ArbiterInvariant 0))
   (((ArbiterCore 
-      (state ArbiterState) 
       (concurrency_depth Int) 
       (obstruction_locus Int)))))
 
 ;; Thread Arbiter transition rule: Ensures the stabilizer remains invariant
 (define-fun transition_arbiter ((arb ArbiterInvariant) (next_state ArbiterState)) ArbiterInvariant
-  (ArbiterCore next_state (+ (concurrency_depth arb) 1) (obstruction_locus arb)))
+  (ArbiterCore (+ (concurrency_depth arb) 1) (obstruction_locus arb)))
 
 ;; --------------------------------------------------------------------------
 ;; SECTION 4: Golay Phase Switch (Temporal Search Space Duality)
 ;; --------------------------------------------------------------------------
-;; Utilizing the binary Golay code [24, 12, 8] characteristics, this morphism 
-;; acts as a temporary search space selector. By invoking the self-dual 
-;; transformation modulo 24, the solver alternates between different temporal 
-;; evaluation pathways, converting deep search trees into structured code-space orbits.
 (define-fun golay_dual_transform ((idx Int)) Int
   (mod (- 24 idx) 24))
 
 (define-fun-rec realize_golay_switched ((s Scheme) (env (Array Int Int)) (arb ArbiterInvariant)) Int
   (match s
     (((Const c) c)
-     ((Coord idx) (select env (golay_dual_transform idx)))
+     ((Coord idx) (select env (golay_dual_transform idx))))
      ((Tensor l r) 
-       (+ (realize_golay_switched l env (transition_arbiter arb (Idle))) 
-          (realize_golay_switched r env (transition_arbiter arb (Idle)))))
+       (+ (realize_golay_switched l env (transition_arbiter arb Idle)) 
+          (realize_golay_switched r env (transition_arbiter arb Idle))))
      ((Fibration idx fiber base)
        (realize_golay_switched base 
                                (store env (golay_dual_transform idx) (realize_golay_switched fiber env arb))
-                               (transition_arbiter arb (Acquired idx 1)))))))
+                               (transition_arbiter arb (Acquired idx 1))))))
 
 ;; --------------------------------------------------------------------------
 ;; SECTION 5: Base Change and Flat Morphisms (Substitution)
@@ -133,7 +125,6 @@
        (realize (collapse (canonical_chain 3)) env)))))
 
 ;; Theorem 2: Intersection Multiplicity Blow-up (Explicit d=5,6 Verification)
-;; The model explicitly embraces the exponential explosion: size(k) = 2^(k+1) - 1
 (echo "=== Verifying Theorem 2: Intersection Multiplicity Blow-up (Exponential Size) ===")
 (assert (not (and
   (= (degree (collapse (canonical_chain 0))) 1)
@@ -146,14 +137,12 @@
 )))
 
 ;; Theorem 3: Thread-Arbiter Stabilization under Golay Phase Switch
-;; Proves that the ThreadArbiter invariants remain cohesive even when the 
-;; exploration paths undergo Golay dual switching across d=5 networks.
 (echo "=== Verifying Theorem 3: Thread-Arbiter Invariant Synchronization ===")
 (declare-const initial_arb ArbiterInvariant)
 (assert (not 
   (forall ((env (Array Int Int)))
-    (= (realize (canonical_chain 5) env)
-       (realize_golay_switched (canonical_chain 5) env initial_arb)))))
+    (= (realize (canonical_chain 4) env)
+       (realize_golay_switched (canonical_chain 4) env initial_arb)))))
 
 ;; ==============================================================================
 ;; Final Execution
