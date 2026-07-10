@@ -13,7 +13,7 @@
 ;; ==============================================================================
 
 ;; --------------------------------------------------------------------------
-;; SECTION 1: The Moduli Space of Arithmetic Schemes (AST Core Structure)
+;; SECTION 1: AST Core Structure
 ;; --------------------------------------------------------------------------
 (declare-datatypes ((Scheme 0))
   (((Const (c_val Int))
@@ -22,7 +22,7 @@
     (Fibration (bound_idx Int) (fiber Scheme) (base Scheme)))))
 
 ;; --------------------------------------------------------------------------
-;; SECTION 2: Crystalline Realization (Environment-Passing Semantics)
+;; SECTION 2: Crystalline Realization
 ;; --------------------------------------------------------------------------
 (define-fun-rec realize ((s Scheme) (env (Array Int Int))) Int
   (match s
@@ -33,25 +33,24 @@
        (realize base (store env idx (realize fiber env)))))))
 
 ;; --------------------------------------------------------------------------
-;; SECTION 3: The Thread Arbiter Invariant Variety
+;; SECTION 3: Thread Arbiter Invariant Variety
 ;; --------------------------------------------------------------------------
 (declare-datatypes ((ArbiterState 0))
   (((Idle)
     (Acquired (owner_thread Int) (priority Int))
     (Released (prev_owner Int)))))
 
-;; Fixed datatype syntax for selectors according to SMT-LIB v2.6 standard
 (declare-datatypes ((ArbiterInvariant 0))
   (((ArbiterCore 
       (concurrency_depth Int) 
       (obstruction_locus Int)))))
 
-;; Thread Arbiter transition rule: Ensures the stabilizer remains invariant
+;; This forces the solver to track the temporal depth explicitly across the tree
 (define-fun transition_arbiter ((arb ArbiterInvariant) (next_state ArbiterState)) ArbiterInvariant
   (ArbiterCore (+ (concurrency_depth arb) 1) (obstruction_locus arb)))
 
 ;; --------------------------------------------------------------------------
-;; SECTION 4: Golay Phase Switch (Temporal Search Space Duality)
+;; SECTION 4: Golay Phase Switch
 ;; --------------------------------------------------------------------------
 (define-fun golay_dual_transform ((idx Int)) Int
   (mod (- 24 idx) 24))
@@ -59,14 +58,14 @@
 (define-fun-rec realize_golay_switched ((s Scheme) (env (Array Int Int)) (arb ArbiterInvariant)) Int
   (match s
     (((Const c) c)
-     ((Coord idx) (select env (golay_dual_transform idx))))
+     ((Coord idx) (select env (golay_dual_transform idx)))  ;; FIXED: Removed the extra closing parenthesis here!
      ((Tensor l r) 
        (+ (realize_golay_switched l env (transition_arbiter arb Idle)) 
           (realize_golay_switched r env (transition_arbiter arb Idle))))
      ((Fibration idx fiber base)
        (realize_golay_switched base 
                                (store env (golay_dual_transform idx) (realize_golay_switched fiber env arb))
-                               (transition_arbiter arb (Acquired idx 1))))))
+                               (transition_arbiter arb (Acquired idx 1))))))) ;; FIXED: Added the necessary closing parenthesis here!
 
 ;; --------------------------------------------------------------------------
 ;; SECTION 5: Base Change and Flat Morphisms (Substitution)
@@ -95,7 +94,7 @@
        (collapse (base_change base idx (collapse fiber)))))))
 
 ;; --------------------------------------------------------------------------
-;; SECTION 7: Arithmetic Degree (Structural Size / Intersection Multiplicity)
+;; SECTION 7: Arithmetic Degree
 ;; --------------------------------------------------------------------------
 (define-fun-rec degree ((s Scheme)) Int
   (match s
@@ -105,19 +104,18 @@
      ((Fibration idx fiber base) (+ 1 (+ (degree fiber) (degree base)))))))
 
 ;; --------------------------------------------------------------------------
-;; SECTION 8: Canonical Divisor Sequence (The Let-Chain at d=5,6 Scale)
+;; SECTION 8: Canonical Divisor Sequence (d=5,6 Scale)
 ;; --------------------------------------------------------------------------
 (define-fun-rec canonical_chain ((k Int)) Scheme
   (ite (<= k 0)
        (Coord 0)
        (Fibration k (canonical_chain (- k 1)) (Tensor (Coord k) (Coord k)))))
 
-
 ;; ==============================================================================
-;; SECTION 9: Verifications (Theorems of Cohomological Rigidity Under Blow-up)
+;; SECTION 9: Verifications
 ;; ==============================================================================
 
-;; Theorem 1: Cohomological Descent (Semantic Preservation)
+;; Theorem 1: Cohomological Descent
 (echo "=== Verifying Theorem 1: Cohomological Descent (Semantic Preservation) ===")
 (assert (not 
   (forall ((env (Array Int Int)))
@@ -125,6 +123,7 @@
        (realize (collapse (canonical_chain 3)) env)))))
 
 ;; Theorem 2: Intersection Multiplicity Blow-up (Explicit d=5,6 Verification)
+;; Ensures true recursive traversal and spatial expansion properties
 (echo "=== Verifying Theorem 2: Intersection Multiplicity Blow-up (Exponential Size) ===")
 (assert (not (and
   (= (degree (collapse (canonical_chain 0))) 1)
@@ -144,8 +143,5 @@
     (= (realize (canonical_chain 4) env)
        (realize_golay_switched (canonical_chain 4) env initial_arb)))))
 
-;; ==============================================================================
-;; Final Execution
-;; ==============================================================================
 (check-sat)
 (echo "=== End of Verification. Expected: UNSAT ===")
