@@ -32,3 +32,6 @@ jobs:
       
           echo "=== Let-Collapse via Hecke-Equivariant Oka-Grauert & Borel-Weil-Bott (d=5,6) ==="
           cvc5 --quant-ind --conjecture-gen --sygus-inst --tlimit=60000 --stats let_collapse_v11.smt2
+
+          echo "=== Let-Collapse via Golay Phase Duality & Thread-Arbiter Invariants (d=5,6) ==="
+          cvc5 --quant-ind --conjecture-gen --sygus-inst --tlimit=120000 --stats let_collapse_v13.smt2
