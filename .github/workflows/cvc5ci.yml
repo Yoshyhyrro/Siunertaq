@@ -2,7 +2,7 @@ name: CVC5 Verification Pipeline
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "example/alire_HeisenbergCarabiner_to_Dhall" ]
   pull_request:
 
 jobs:
