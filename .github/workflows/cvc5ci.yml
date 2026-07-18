@@ -2,31 +2,39 @@ name: CVC5 Verification Pipeline
 
 on:
   push:
-    branches: [ "example/alire_HeisenbergCarabiner_to_Dhall" ]
+    branches: [ "example/alire_HeisenbergCarabiner_to_Dhall" ] #
   pull_request:
 
 jobs:
   verify-spark:
     runs-on: ubuntu-latest
+    # Enforce a pristine, predictable Debian container environment for the entire job
+    container:
+      image: debian:bookworm
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Provision CVC5 theorem prover
+      - name: Provision SPARK Environment (Compiler, Prover, and Package Manager)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cvc5 why3
+          apt-get update
+          # Install the native GNAT toolchain, SPARK verification engine (GNATprove), Why3, and CVC5 via APT
+          apt-get install -y gnat gprbuild gnatprove why3 cvc5 curl unzip
 
-      - name: Initialize Alire toolchain
-        uses: alire-project/setup-alire@v3
+          # Bootstrap Alire manually to guarantee explicit path control and bypass brittle actions
+          curl -sL https://github.com/alire-project/alire/releases/download/v2.0.1/alr-2.0.1-bin-x86_64-linux.zip -o alr.zip
+          unzip alr.zip -d /usr/local/
+          rm alr.zip
+          
+          # Initialize Why3 configuration directly with the native detect command
+          why3 config detect
 
       - name: Bootstrap Ada Source Directory
         run: |
           # Scaffold the physical source tree required by the GNAT project manager
           mkdir -p src
           
-          # Synthesize a baseline SPARK specification with contract-based assertions
           cat << 'EOF' > src/proof_target.ads
           package Proof_Target with SPARK_Mode is
              procedure Dummy_Proof (X : in out Integer) with
@@ -35,7 +43,6 @@ jobs:
           end Proof_Target;
           EOF
 
-          # Synthesize the corresponding package body to satisfy compiler code generation mandates
           cat << 'EOF' > src/proof_target.adb
           package body Proof_Target with SPARK_Mode is
              procedure Dummy_Proof (X : in out Integer) is
@@ -45,28 +52,16 @@ jobs:
           end Proof_Target;
           EOF
 
-      - name: Detect provers and generate Why3 config
-        run: |
-          why3config --detect-provers
-
       - name: Build Alire Workspace
         run: |
-          # Validate and compile the target workspace dependencies
+          # Force Alire to synchronize with the globally installed system compiler rather than fetching its own
+          alr toolchain --select gnat gprbuild
           alr build --validation
-
-      - name: Detect provers and generate Why3 config
-        run: |
-          # Force Why3 to scan the host system (/usr/bin/cvc5) and generate ~/.why3.conf
-          alr exec -- why3config --detect-provers
 
       - name: Execute SPARK verification via CVC5
         run: |
-          # Run the verification leveraging the newly discovered native CVC5 prover instance
-          alr update
-          alr gnatprove -P siunertaq.gpr \
-            --why3-conf=$HOME/.why3.conf \
-            --prover=cvc5 \
-            --keep-failures
+          # Execute the globally available gnatprove command natively
+          gnatprove -P siunertaq.gpr --prover=cvc5 --keep-failures
 
       - name: Aggregate SMT2 artifacts
         if: always()
