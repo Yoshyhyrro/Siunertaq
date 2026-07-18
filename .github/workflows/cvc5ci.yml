@@ -23,10 +23,7 @@ jobs:
 
       - name: Bootstrap Ada Source Directory
         run: |
-          # Initialize the source directory for the Ada compiler
           mkdir -p src
-
-          # Generate the SPARK package specification
           cat << 'EOF' > src/proof_target.ads
           package Proof_Target with SPARK_Mode is
              procedure Dummy_Proof (X : in out Integer) with
@@ -35,7 +32,6 @@ jobs:
           end Proof_Target;
           EOF
 
-          # Generate the corresponding SPARK package body to satisfy gprbuild code generation
           cat << 'EOF' > src/proof_target.adb
           package body Proof_Target with SPARK_Mode is
              procedure Dummy_Proof (X : in out Integer) is
@@ -47,13 +43,12 @@ jobs:
 
       - name: Build Alire Workspace
         run: |
-          # Synchronize and build the environment before executing the verification frontend
           alr build --validation
 
       - name: Execute SPARK verification via CVC5
         run: |
-          # Run formal verification using the fully qualified Alire workspace toolchain
-          alr exec -- gnatprove -P project.gpr --prover=cvc5 --keep-failures
+          # Target the specific siunertaq.gpr descriptor natively
+          alr exec -- gnatprove -P siunertaq.gpr --prover=cvc5 --keep-failures
 
       - name: Aggregate SMT2 artifacts
         if: always()
