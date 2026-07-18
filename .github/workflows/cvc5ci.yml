@@ -45,6 +45,10 @@ jobs:
           end Proof_Target;
           EOF
 
+      - name: Detect provers and generate Why3 config
+        run: |
+          why3config --detect-provers
+
       - name: Build Alire Workspace
         run: |
           # Validate and compile the target workspace dependencies
