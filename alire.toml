@@ -8,5 +8,5 @@ licenses = "Apache-2.0"
 project-files = ["siunertaq.gpr"]
 
 # Request the SPARK verification engine as a workspace development dependency
-[depends-on]
+[[depends-on]]
 gnatprove = "*"
