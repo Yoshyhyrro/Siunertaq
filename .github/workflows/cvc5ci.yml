@@ -20,7 +20,6 @@ jobs:
 
       - name: Initialize Alire toolchain
         uses: alire-project/setup-alire@v3
-        # gnatprove is not a base toolchain component, so we stick to the defaults
 
       - name: Bootstrap Ada Source Directory
         run: |
@@ -46,26 +45,24 @@ jobs:
           end Proof_Target;
           EOF
 
-      - name: Inject SPARK Verification Engine
-        run: |
-          # Fetch and attach GNATprove as a development dependency to the current workspace
-          alr update
-          alr gnatprove -P siunertaq.gpr
-
       - name: Build Alire Workspace
         run: |
-          # Build the workspace to resolve and compile all newly fetched dependencies
+          # Validate and compile the target workspace dependencies
           alr build --validation
 
-      - name: Configure and Validate Prover Environment
+      - name: Detect provers and generate Why3 config
         run: |
-          # Enumerate registered SMT solvers within the Why3 configuration to validate CVC5 availability
-          alr exec -- gnatprove --list-provers
+          # Force Why3 to scan the host system (/usr/bin/cvc5) and generate ~/.why3.conf
+          alr exec -- why3config --detect-provers
 
       - name: Execute SPARK verification via CVC5
         run: |
-          # Invoke the GNATprove frontend; it is now guaranteed to exist in the Alire PATH
-          alr exec -- gnatprove -P siunertaq.gpr --prover=cvc5 --keep-failures
+          # Run the verification leveraging the newly discovered native CVC5 prover instance
+          alr update
+          alr gnatprove -P siunertaq.gpr \
+            --why3-conf=$HOME/.why3.conf \
+            --prover=cvc5 \
+            --keep-failures
 
       - name: Aggregate SMT2 artifacts
         if: always()
