@@ -1,9 +1,8 @@
 name = "siunertaq_ada"
 version = "0.1.0"
 description = "SPARK/Ada formal verification core for Siunertaq mathematical pipeline"
-authors = ["Yoshihiro Hasegawa"]
-maintainers = ["Yoshihiro Hasegawa"]
+authors = ["Yoshihiro Hasegawa <je-suis-1oeuf-devautour@proton.me>"]
+maintainers = ["Yoshihiro Hasegawa <je-suis-1oeuf-devautour@proton.me>"]
 licenses = "Apache-2.0"
 
-# Reference the GPR project file directly at the root level
 project-files = ["project.gpr"]
