@@ -20,13 +20,14 @@ jobs:
 
       - name: Initialize Alire toolchain
         uses: alire-project/setup-alire@v3
-        with:
-          # Explicitly provision the SPARK verification engine alongside the standard Ada toolchain
-          toolchain: gnat_native gprbuild gnatprove
+        # Removed the invalid toolchain override; gnat_native implicitly provisions gnatprove.
 
       - name: Bootstrap Ada Source Directory
         run: |
+          # Scaffold the physical source tree required by the GNAT project manager
           mkdir -p src
+          
+          # Synthesize a baseline SPARK specification with contract-based assertions
           cat << 'EOF' > src/proof_target.ads
           package Proof_Target with SPARK_Mode is
              procedure Dummy_Proof (X : in out Integer) with
@@ -35,6 +36,7 @@ jobs:
           end Proof_Target;
           EOF
 
+          # Synthesize the corresponding package body to satisfy compiler code generation mandates
           cat << 'EOF' > src/proof_target.adb
           package body Proof_Target with SPARK_Mode is
              procedure Dummy_Proof (X : in out Integer) is
@@ -48,25 +50,25 @@ jobs:
         run: |
           alr build --validation
 
+      - name: Configure and Validate Prover Environment
+        run: |
+          # Enumerate registered SMT solvers within the Why3 configuration to validate CVC5 availability
+          alr exec -- gnatprove --list-provers
+
       - name: Execute SPARK verification via CVC5
         run: |
-          # The gnatprove executable is now guaranteed to exist within the Alire context
-          alr exec -- gnatprove -P siunertaq.gpr --prover=cvc5 --keep-failures
-
-      - name: Inspect GNATprove Diagnostics on Failure
-        if: failure()
-        run: |
-          if [ -f "obj/gnatprove/gnatprove.out" ]; then
-            echo "=== BEGIN GNATPROVE DIAGNOSTICS ==="
-            cat obj/gnatprove/gnatprove.out
-            echo "=== END GNATPROVE DIAGNOSTICS ==="
-          else
-            echo "Error: obj/gnatprove/gnatprove.out not found."
+          # Invoke the GNATprove frontend with elevated verbosity and redirect standard streams for diagnostic capture
+          alr exec -- gnatprove -P siunertaq.gpr --prover=cvc5 --keep-failures -v 2>&1 | tee gnatprove_console.log
+          
+          # Propagate the non-zero exit status to halt the pipeline on verification failure
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            exit 1
           fi
 
       - name: Aggregate SMT2 artifacts
         if: always()
         run: |
+          # Establish the staging directory for extracted SMT-LIB v2 artifacts
           STAGING_DIR="${{ github.workspace }}/ci-out/smt2-artifacts/ada-cvc5"
           mkdir -p "$STAGING_DIR"
 
