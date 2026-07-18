@@ -23,13 +23,25 @@ jobs:
 
       - name: Bootstrap Ada Source Directory
         run: |
-          # Generate a minimal placeholder spec to provide a valid target for GNATprove
+          # Initialize the source directory for the Ada compiler
           mkdir -p src
+
+          # Generate the SPARK package specification
           cat << 'EOF' > src/proof_target.ads
           package Proof_Target with SPARK_Mode is
              procedure Dummy_Proof (X : in out Integer) with
                Pre  => X < Integer'Last,
                Post => X > X'Old;
+          end Proof_Target;
+          EOF
+
+          # Generate the corresponding SPARK package body to satisfy gprbuild code generation
+          cat << 'EOF' > src/proof_target.adb
+          package body Proof_Target with SPARK_Mode is
+             procedure Dummy_Proof (X : in out Integer) is
+             begin
+                X := X + 1;
+             end Dummy_Proof;
           end Proof_Target;
           EOF
 

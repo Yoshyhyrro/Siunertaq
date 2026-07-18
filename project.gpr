@@ -1,4 +1,4 @@
-project Siunertaq is
+project Project is
 
    -- Configure root-level directory layout for source and compilation artifacts
    for Source_Dirs use ("src");
@@ -9,4 +9,4 @@ project Siunertaq is
       for Switches use ("--prover=cvc5", "--report=all");
    end Prove;
 
-end Siunertaq;
+end Project;
