@@ -1,0 +1,14 @@
+name = "siunertaq_ada"
+version = "0.1.0"
+description = "SPARK/Ada formal verification core for Siunertaq mathematical pipeline"
+authors = ["Siunertaq Engineers"]
+maintainers = ["Siunertaq Engineers"]
+licenses = "Apache-2.0"
+
+# Workspace configuration for Alire project execution
+[gpr-set]
+project-files = ["project.gpr"]
+
+# System toolchain dependencies for formal verification
+[dependencies]
+gnatprove = "^12.1.0"
