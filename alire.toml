@@ -10,3 +10,4 @@ project-files = ["siunertaq.gpr"]
 # Request the SPARK verification engine as a workspace development dependency
 [[dev-depends-on]]
 gnatprove = "*"
+development = true
