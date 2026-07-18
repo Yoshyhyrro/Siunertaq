@@ -49,7 +49,7 @@ jobs:
       - name: Inject SPARK Verification Engine
         run: |
           # Fetch and attach GNATprove as a development dependency to the current workspace
-          alr -n with --development gnatprove
+          alr -n with --dev gnatprove
 
       - name: Build Alire Workspace
         run: |
