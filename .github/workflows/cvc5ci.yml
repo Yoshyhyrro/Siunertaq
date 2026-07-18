@@ -49,27 +49,24 @@ jobs:
         run: |
           alr exec -- gnatprove -P siunertaq.gpr --prover=cvc5 --keep-failures
 
-      - name: Aggregate SMT2 artifacts and print logs
+      - name: Aggregate SMT2 and Log Artifacts
         if: always()
         run: |
-          # Dump the internal frontend output to the GitHub Actions console for inspection
-          if [ -f "obj/gnatprove/gnatprove.out" ]; then
-            echo "=== BEGIN GNATPROVE DIAGNOSTICS ==="
-            cat obj/gnatprove/gnatprove.out
-            echo "=== END GNATPROVE DIAGNOSTICS ==="
-          fi
-
-          STAGING_DIR="${{ github.workspace }}/ci-out/smt2-artifacts/ada-cvc5"
+          # Guarantee target directory existence even if preceding steps failed
+          STAGING_DIR="${{ github.workspace }}/ci-out/verification-artifacts"
           mkdir -p "$STAGING_DIR"
 
+          # Harvest internal compiler diagnostics and proof attempt histories
           if [ -d "obj/gnatprove" ]; then
+            find obj/gnatprove -name "*.out" -exec cp {} "$STAGING_DIR/" \;
+            find obj/gnatprove -name "*.log" -exec cp {} "$STAGING_DIR/" \;
             find obj/gnatprove -name "*.smt2" -exec cp {} "$STAGING_DIR/" \;
           fi
 
-      - name: Persist verification artifacts
+      - name: Persist Verification Outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: smt2-verification-artifacts
-          path: ci-out/smt2-artifacts/
+          name: spark-verification-results
+          path: ci-out/verification-artifacts/
           retention-days: 7
