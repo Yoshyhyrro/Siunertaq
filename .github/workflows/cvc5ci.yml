@@ -47,12 +47,18 @@ jobs:
 
       - name: Execute SPARK verification via CVC5
         run: |
-          # Target the specific siunertaq.gpr descriptor natively
           alr exec -- gnatprove -P siunertaq.gpr --prover=cvc5 --keep-failures
 
-      - name: Aggregate SMT2 artifacts
+      - name: Aggregate SMT2 artifacts and print logs
         if: always()
         run: |
+          # Dump the internal frontend output to the GitHub Actions console for inspection
+          if [ -f "obj/gnatprove/gnatprove.out" ]; then
+            echo "=== BEGIN GNATPROVE DIAGNOSTICS ==="
+            cat obj/gnatprove/gnatprove.out
+            echo "=== END GNATPROVE DIAGNOSTICS ==="
+          fi
+
           STAGING_DIR="${{ github.workspace }}/ci-out/smt2-artifacts/ada-cvc5"
           mkdir -p "$STAGING_DIR"
 
