@@ -70,7 +70,7 @@ jobs:
           # release), not from apt, so it's not on the plain PATH. `alr exec`
           # runs the command inside the workspace's resolved environment, where
           # gnatprove is available.
-          alr exec -- gnatprove -P siunertaq.gpr --prover=cvc5 --keep-failures
+          alr exec -- gnatprove -P siunertaq.gpr --prover=cvc5 --debug-save-vcs
 
       - name: Aggregate SMT2 artifacts
         if: always()
