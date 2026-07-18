@@ -22,7 +22,11 @@ jobs:
           # gnatprove is NOT an apt package on Debian (bookworm/trixie/sid) - AdaCore only
           # ships it as a binary release via Alire. Install everything apt *does* have,
           # and let Alire supply gnatprove itself in the next step.
-          apt-get install -y gnat gprbuild why3 cvc5 curl unzip
+          # git is required by Alire (e.g. to add the community index); the minimal
+          # debian:bookworm image has neither git nor sudo, and Alire's own
+          # auto-install fallback shells out via `sudo`, which fails here - so
+          # install git ourselves up front instead of letting Alire try.
+          apt-get install -y gnat gprbuild why3 cvc5 curl unzip git
 
           # Bootstrap Alire manually to guarantee explicit path control and bypass brittle actions
           curl -sL https://github.com/alire-project/alire/releases/download/v2.0.1/alr-2.0.1-bin-x86_64-linux.zip -o alr.zip
