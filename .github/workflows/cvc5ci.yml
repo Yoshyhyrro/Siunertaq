@@ -16,7 +16,7 @@ jobs:
       - name: Provision CVC5 theorem prover
         run: |
           sudo apt-get update
-          sudo apt-get install -y cvc5
+          sudo apt-get install -y cvc5 why3
 
       - name: Initialize Alire toolchain
         uses: alire-project/setup-alire@v3
