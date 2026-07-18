@@ -20,6 +20,9 @@ jobs:
 
       - name: Initialize Alire toolchain
         uses: alire-project/setup-alire@v3
+        with:
+          # Explicitly provision the SPARK verification engine alongside the standard Ada toolchain
+          toolchain: gnat_native gprbuild gnatprove
 
       - name: Bootstrap Ada Source Directory
         run: |
@@ -47,12 +50,12 @@ jobs:
 
       - name: Execute SPARK verification via CVC5
         run: |
+          # The gnatprove executable is now guaranteed to exist within the Alire context
           alr exec -- gnatprove -P siunertaq.gpr --prover=cvc5 --keep-failures
 
       - name: Inspect GNATprove Diagnostics on Failure
-        if: always()
+        if: failure()
         run: |
-          # Force diagnostic logging into stdout regardless of execution exit status
           if [ -f "obj/gnatprove/gnatprove.out" ]; then
             echo "=== BEGIN GNATPROVE DIAGNOSTICS ==="
             cat obj/gnatprove/gnatprove.out
