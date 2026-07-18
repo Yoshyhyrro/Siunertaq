@@ -20,7 +20,7 @@ jobs:
 
       - name: Initialize Alire toolchain
         uses: alire-project/setup-alire@v3
-        # Removed the invalid toolchain override; gnat_native implicitly provisions gnatprove.
+        # gnatprove is not a base toolchain component, so we stick to the defaults
 
       - name: Bootstrap Ada Source Directory
         run: |
@@ -46,8 +46,14 @@ jobs:
           end Proof_Target;
           EOF
 
+      - name: Inject SPARK Verification Engine
+        run: |
+          # Fetch and attach GNATprove as a development dependency to the current workspace
+          alr -n with --dev gnatprove
+
       - name: Build Alire Workspace
         run: |
+          # Build the workspace to resolve and compile all newly fetched dependencies
           alr build --validation
 
       - name: Configure and Validate Prover Environment
@@ -57,13 +63,8 @@ jobs:
 
       - name: Execute SPARK verification via CVC5
         run: |
-          # Invoke the GNATprove frontend with elevated verbosity and redirect standard streams for diagnostic capture
-          alr exec -- gnatprove -P siunertaq.gpr --prover=cvc5 --keep-failures -v 2>&1 | tee gnatprove_console.log
-          
-          # Propagate the non-zero exit status to halt the pipeline on verification failure
-          if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            exit 1
-          fi
+          # Invoke the GNATprove frontend; it is now guaranteed to exist in the Alire PATH
+          alr exec -- gnatprove -P siunertaq.gpr --prover=cvc5 --keep-failures
 
       - name: Aggregate SMT2 artifacts
         if: always()
