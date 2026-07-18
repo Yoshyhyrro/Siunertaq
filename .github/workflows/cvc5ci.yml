@@ -19,8 +19,10 @@ jobs:
       - name: Provision SPARK Environment (Compiler, Prover, and Package Manager)
         run: |
           apt-get update
-          # Install the native GNAT toolchain, SPARK verification engine (GNATprove), Why3, and CVC5 via APT
-          apt-get install -y gnat gprbuild gnatprove why3 cvc5 curl unzip
+          # gnatprove is NOT an apt package on Debian (bookworm/trixie/sid) - AdaCore only
+          # ships it as a binary release via Alire. Install everything apt *does* have,
+          # and let Alire supply gnatprove itself in the next step.
+          apt-get install -y gnat gprbuild why3 cvc5 curl unzip
 
           # Bootstrap Alire manually to guarantee explicit path control and bypass brittle actions
           curl -sL https://github.com/alire-project/alire/releases/download/v2.0.1/alr-2.0.1-bin-x86_64-linux.zip -o alr.zip
@@ -60,8 +62,11 @@ jobs:
 
       - name: Execute SPARK verification via CVC5
         run: |
-          # Execute the globally available gnatprove command natively
-          gnatprove -P siunertaq.gpr --prover=cvc5 --keep-failures
+          # gnatprove came from the `alire.toml` depends-on entry (Alire's binary
+          # release), not from apt, so it's not on the plain PATH. `alr exec`
+          # runs the command inside the workspace's resolved environment, where
+          # gnatprove is available.
+          alr exec -- gnatprove -P siunertaq.gpr --prover=cvc5 --keep-failures
 
       - name: Aggregate SMT2 artifacts
         if: always()
