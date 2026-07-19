@@ -85,6 +85,13 @@ jobs:
           chmod +x /usr/local/bin/dhall
           rm dhall.tar.bz2
 
+          # Schema.dhall / BatchJob.dhall / ToSMT2.dhall live together in
+          # modules/dhall-bridge/src/main/resources/ (the dhallBridge sbt
+          # module's resource dir) so their relative ./Schema.dhall and
+          # ./BatchJob.dhall imports resolve; generated output (batch.smt2,
+          # expected.txt, actual.txt) stays at the workspace root.
+          DHALL_SRC="modules/dhall-bridge/src/main/resources"
+
           # ToSMT2.dhall gates each step per z/OS JCL COND= semantics: `cond`
           # decides whether a step runs at all (based on the *preceding*
           # step's outcome), it does not assert a property about that step's
@@ -92,7 +99,7 @@ jobs:
           # `unsat` means CVC5 independently confirms Dhall's own concrete
           # evaluation of that step's input_prog. See ToSMT2.dhall's header
           # comment for the exact gating rules and modeling choices.
-          dhall text --file ToSMT2.dhall --output batch.smt2
+          dhall text --file "$DHALL_SRC/ToSMT2.dhall" --output batch.smt2
 
           if grep -q '; ERROR:' batch.smt2; then
             echo "::error::ToSMT2.dhall reported a generation error:"
