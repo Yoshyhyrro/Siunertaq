@@ -70,7 +70,47 @@ jobs:
           # release), not from apt, so it's not on the plain PATH. `alr exec`
           # runs the command inside the workspace's resolved environment, where
           # gnatprove is available.
+          # --keep-failures is not a real gnatprove switch. To preserve the
+          # .smt2 prover input files that the next step collects, use
+          # --debug-save-vcs, which stops gnatprove from deleting intermediate
+          # prover files after each check.
           alr exec -- gnatprove -P siunertaq.gpr --prover=cvc5 --debug-save-vcs
+
+      - name: Compile Siunertaq batch to SMT-LIB v2.6 and verify with CVC5
+        run: |
+          # Dhall isn't an apt package either - fetch it the same way Alire is
+          # fetched above: a pinned GitHub release binary.
+          curl -sL https://github.com/dhall-lang/dhall-haskell/releases/download/1.42.2/dhall-1.42.2-x86_64-linux.tar.bz2 -o dhall.tar.bz2
+          tar xjf dhall.tar.bz2 -C /usr/local/
+          chmod +x /usr/local/bin/dhall
+          rm dhall.tar.bz2
+
+          # ToSMT2.dhall gates each step per z/OS JCL COND= semantics: `cond`
+          # decides whether a step runs at all (based on the *preceding*
+          # step's outcome), it does not assert a property about that step's
+          # own result. Every step that does run gets an SMT-LIB cross-check:
+          # `unsat` means CVC5 independently confirms Dhall's own concrete
+          # evaluation of that step's input_prog. See ToSMT2.dhall's header
+          # comment for the exact gating rules and modeling choices.
+          dhall text --file ToSMT2.dhall --output batch.smt2
+
+          if grep -q '; ERROR:' batch.smt2; then
+            echo "::error::ToSMT2.dhall reported a generation error:"
+            grep '; ERROR:' batch.smt2
+            exit 1
+          fi
+
+          grep -o 'EXPECT: [a-z]*' batch.smt2 | cut -d' ' -f2 > expected.txt
+          cvc5 --incremental batch.smt2 > actual.txt
+          cat actual.txt
+
+          if ! diff -q expected.txt actual.txt > /dev/null; then
+            echo "::error::CVC5 verdicts did not match the EXPECT comments in batch.smt2 (left=expected, right=actual):"
+            paste expected.txt actual.txt | nl
+            exit 1
+          fi
+
+          echo "All $(wc -l < expected.txt) batch step(s) verified as expected."
 
       - name: Aggregate SMT2 artifacts
         if: always()
@@ -82,6 +122,17 @@ jobs:
           if [ -d "obj/gnatprove" ]; then
             find obj/gnatprove -name "*.smt2" -exec cp {} "$STAGING_DIR/" \;
           fi
+
+          # Also collect the Dhall-generated batch script (and the expected
+          # vs. actual verdict logs, whether or not the check above passed -
+          # useful for debugging a failed run).
+          DHALL_STAGING_DIR="${{ github.workspace }}/ci-out/smt2-artifacts/dhall-batch"
+          mkdir -p "$DHALL_STAGING_DIR"
+          for f in batch.smt2 expected.txt actual.txt; do
+            if [ -f "$f" ]; then
+              cp "$f" "$DHALL_STAGING_DIR/"
+            fi
+          done
 
       - name: Persist verification artifacts
         if: always()
