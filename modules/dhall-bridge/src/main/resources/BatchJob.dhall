@@ -2,57 +2,21 @@
   Core schema definition for the Siunertaq Batch pipeline.
   Enforces total evaluation and structural rigidity before lowering to JSON.
   Integrates SMT solver metadata to bridge abstract ASTs with verification targets.
+
+  NOTE: this file previously defined CondOp/CondExpr/BSDVertexTag/StackInstr/
+  SMTConfig/StepDef inline. They now live in ./Schema.dhall so that the
+  SMT-LIB v2.6 generator (ToSMT2.dhall) type-checks against the exact same
+  definitions instead of a hand-copied duplicate that could drift out of sync.
 -}
+let Schema = ./Schema.dhall
 
-let CondOp = < LT | LE | EQ | NE | GT | GE >
+let CondOp = Schema.CondOp
 
-let CondExpr =
-      < Compare : { threshold : Natural, op : CondOp }
-      | Even    : {}
-      | Only    : {}
-      | >
+let CondExpr = Schema.CondExpr
 
-let BSDVertexTag = < Leech | AffineDual | Padic | Selmer >
+let StackInstr = Schema.StackInstr
 
-let StackInstr =
-      < PushScalar : { n : Natural }
-      | PushVec3   : { x : Natural, y : Natural, z : Natural }
-      | AddScalar  : {}
-      | AddVec3    : {}
-      | MulScalar  : {}
-      | DotVec3    : {}
-      >
-
-{-|
-  Yices verification metadata schema.
-  Target logic defaults to Quantifier-Free Linear Integer Arithmetic (QF_LIA).
--}
-let SMTConfig =
-      { export_smt   : Bool
-      , target_logic : Text
-      }
-
-{-|
-  Default environment bindings for step definitions.
-  Utilizes Dhall's record completion operator (::) to eliminate boilerplate
-  and enforce safe defaults for priority and SMT generation.
--}
-let StepDef =
-      { Type =
-          { name        : Text
-          , effect_tag  : Text
-          , cond        : Optional CondExpr
-          , norm_vertex : BSDVertexTag
-          , input_prog  : List StackInstr
-          , priority    : Natural
-          , smt_config  : SMTConfig
-          }
-      , default =
-          { cond       = None CondExpr
-          , priority   = 1
-          , smt_config = { export_smt = True, target_logic = "QF_LIA" }
-          }
-      }
+let StepDef = Schema.StepDef
 
 let mkCond =
       \(t : Natural) -> \(op : CondOp) ->
@@ -64,22 +28,28 @@ in  { job_name = "SiunertaqBatch_Rigid"
         [ StepDef::{
           , name        = "frobenius-compile"
           , effect_tag  = "tensor_bang"
-          , norm_vertex = BSDVertexTag.AffineDual
+          , norm_vertex = Schema.BSDVertexTag.AffineDual
           , input_prog  =
               [ StackInstr.PushScalar { n = 12 }
               , StackInstr.PushScalar { n = 1 }
-              , StackInstr.MulScalar  {}
+              -- was `StackInstr.MulScalar {}` - {} is the *type* of the empty
+              -- record; {=} is its unique *value*. A bare union alternative
+              -- with an empty-record payload must be applied to a value, so
+              -- this needs {=}, not {}. (Confirmed against dhall 1.42.2:
+              -- `{}` here fails to type-check with "Wrong type of function
+              -- argument".)
+              , StackInstr.MulScalar  {=}
               ]
           }
         , StepDef::{
           , name        = "padic-lower"
           , effect_tag  = "oplus_padic"
           , cond        = mkCond 4 CondOp.LT
-          , norm_vertex = BSDVertexTag.Padic
+          , norm_vertex = Schema.BSDVertexTag.Padic
           , input_prog  =
               [ StackInstr.PushVec3 { x = 2, y = 4, z = 0 }
               , StackInstr.PushVec3 { x = 1, y = 0, z = 8 }
-              , StackInstr.DotVec3  {}
+              , StackInstr.DotVec3  {=}
               ]
           , priority    = 2
           }
