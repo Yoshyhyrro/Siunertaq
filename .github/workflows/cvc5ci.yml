@@ -2,12 +2,12 @@ name: CVC5 Verification Pipeline
 
 on:
   push:
-    branches: [ "example/alire_HeisenbergCarabiner_to_Dhall" ] #
+    branches: [ "example/alire_HeisenbergCarabiner_to_Dhall" ]
   pull_request:
 
 jobs:
   verify-spark:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04-arm
     # Enforce a pristine, predictable Debian container environment for the entire job
     container:
       image: debian:bookworm
