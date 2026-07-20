@@ -29,9 +29,11 @@ jobs:
           apt-get install -y gnat gprbuild why3 cvc5 curl unzip git
 
           # Bootstrap Alire manually to guarantee explicit path control and bypass brittle actions
-          curl -sL https://github.com/alire-project/alire/releases/download/v2.0.1/alr-2.0.1-bin-x86_64-linux.zip -o alr.zip
-          unzip alr.zip -d /usr/local/
-          rm alr.zip
+          curl --fail --show-error --location --max-time 30 \ 
+            https://github.com/alire-project/alire/releases/download/v2.0.1/alr-2.0.1-bin-x86_64-linux.zip -o alr.zip \
+            -o alr.zip
+            unzip alr.zip -d /usr/local/
+            rm alr.zip
           
           # Initialize Why3 configuration directly with the native detect command
           why3 config detect
