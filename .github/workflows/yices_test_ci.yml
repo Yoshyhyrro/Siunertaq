@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - feature/HeisenbergCarabiner_to_Dhall
+      - example/alire_HeisenbergCarabiner_to_Dhall
     paths:
       - build.sbt
       - modules/core/**
@@ -76,7 +76,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          sbt "dhallBridge/testOnly io.siunertaq.batch.CondEvaluatorSpec"
+          sbt "batchBridge/testOnly io.siunertaq.batch.CondEvaluatorSpec"
 
       - name: Run threshold and Yices tests
         shell: bash
