@@ -32,6 +32,7 @@ class JobSupervisorActor(
       case _: Exception   => SupervisorStrategy.Restart
 
   // ─── job state ───────────────────────────────────────────────────────────────
+  private var jobName:        String        = ""
   private var remainingSteps: List[StepDef] = Nil
   private var maxRC:          Int           = 0
   private var abended:        Boolean       = false
@@ -44,6 +45,7 @@ class JobSupervisorActor(
 
     case RunJob(jobDef) =>
       log.info("[JOB START] job={} prime={}", jobDef.jobName, jobDef.prime)
+      jobName = jobDef.jobName
       replyTo = Some(sender())
       remainingSteps = jobDef.steps.sortBy(_.priority)
       dispatchNextStep()
@@ -74,7 +76,7 @@ class JobSupervisorActor(
     remainingSteps match
       case Nil =>
         log.info("[JOB END] maxRC={} abended={}", maxRC, abended)
-        replyTo.foreach(_ ! JobResult("SiunertaqBatch", notes.toList, maxRC))
+        replyTo.foreach(_ ! JobResult(jobName, notes.toList, maxRC))
       case stepDef :: rest =>
         remainingSteps = rest
         val actor = context.actorOf(
