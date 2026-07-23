@@ -1,0 +1,12 @@
+name = "siunertaq_ada"
+version = "0.1.0"
+description = "SPARK/Ada formal verification core for Siunertaq mathematical pipeline"
+authors = ["Yoshihiro Hasegawa <je-suis-1oeuf-devautour@proton.me>"]
+maintainers = ["Yoshihiro Hasegawa <je-suis-1oeuf-devautour@proton.me>"]
+licenses = "Apache-2.0"
+
+project-files = ["siunertaq.gpr"]
+
+# Request the SPARK verification engine as a workspace development dependency
+[[depends-on]]
+gnatprove = "*"

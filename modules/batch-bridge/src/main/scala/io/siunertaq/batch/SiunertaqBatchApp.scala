@@ -28,14 +28,18 @@ object SiunertaqBatchApp extends IOApp.Simple:
 
   // IO.bracket is not available as a static method in cats-effect 3.x.
   // Use the instance method IO[A]#bracket(use)(release) instead.
+  // ActorSystem.terminate() returns Future[Terminated] (Pekko classic API) -
+  // it must be chained via IO.fromFuture, the same way supervisor.ask(...) is
+  // below, or the release action completes as soon as termination is merely
+  // *requested*, not once the actor system has actually finished shutting down.
   override def run: IO[Unit] =
-    IO(ActorSystem("siunertaq-batch")).bracket(runBatch)(sys => IO(sys.terminate()).void)
+    IO(ActorSystem("siunertaq-batch")).bracket(runBatch)(sys => IO.fromFuture(IO(sys.terminate())).void)
 
   private def runBatch(system: ActorSystem): IO[Unit] =
     for
       // Load job definition via Dhall REPL or dhall-to-json
       dhallPath <- IO(Paths.get(
-        sys.env.getOrElse("BATCH_JOB_DHALL", "modules/batch-bridge/src/main/resources/BatchJob.dhall")
+        sys.env.getOrElse("BATCH_JOB_DHALL", "modules/dhall-bridge/src/main/resources/BatchJob.dhall")
       ))
       jobDef <- DhallBatchRegistry.loadBatchJobFromFile(dhallPath)
 

@@ -1,0 +1,96 @@
+name: CVC5 Verification Pipeline
+
+on:
+  push:
+    branches: [ "example/feature/alire_pm_test" ]
+  pull_request:
+
+jobs:
+  verify-spark:
+    runs-on: ubuntu-latest
+    # Enforce a pristine, predictable Debian container environment for the entire job
+    container:
+      image: debian:bookworm
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Provision SPARK Environment (Compiler, Prover, and Package Manager)
+        run: |
+          apt-get update
+          # gnatprove is NOT an apt package on Debian (bookworm/trixie/sid) - AdaCore only
+          # ships it as a binary release via Alire. Install everything apt *does* have,
+          # and let Alire supply gnatprove itself in the next step.
+          # git is required by Alire (e.g. to add the community index); the minimal
+          # debian:bookworm image has neither git nor sudo, and Alire's own
+          # auto-install fallback shells out via `sudo`, which fails here - so
+          # install git ourselves up front instead of letting Alire try.
+          apt-get install -y gnat gprbuild why3 cvc5 curl unzip git
+
+          # Bootstrap Alire manually to guarantee explicit path control and bypass brittle actions
+          curl -sL https://github.com/alire-project/alire/releases/download/v2.0.1/alr-2.0.1-bin-x86_64-linux.zip -o alr.zip
+          unzip alr.zip -d /usr/local/
+          rm alr.zip
+          
+          # Initialize Why3 configuration directly with the native detect command
+          why3 config detect
+
+      - name: Bootstrap Ada Source Directory
+        run: |
+          # Scaffold the physical source tree required by the GNAT project manager
+          mkdir -p src
+          
+          cat << 'EOF' > src/proof_target.ads
+          package Proof_Target with SPARK_Mode is
+             procedure Dummy_Proof (X : in out Integer) with
+               Pre  => X < Integer'Last,
+               Post => X > X'Old;
+          end Proof_Target;
+          EOF
+
+          cat << 'EOF' > src/proof_target.adb
+          package body Proof_Target with SPARK_Mode is
+             procedure Dummy_Proof (X : in out Integer) is
+             begin
+                X := X + 1;
+             end Dummy_Proof;
+          end Proof_Target;
+          EOF
+
+      - name: Build Alire Workspace
+        run: |
+          # Force Alire to synchronize with the globally installed system compiler rather than fetching its own
+          alr toolchain --select gnat gprbuild
+          alr build --validation
+
+      - name: Execute SPARK verification via CVC5
+        run: |
+          # gnatprove came from the `alire.toml` depends-on entry (Alire's binary
+          # release), not from apt, so it's not on the plain PATH. `alr exec`
+          # runs the command inside the workspace's resolved environment, where
+          # gnatprove is available.
+          # --keep-failures is not a real gnatprove switch. To preserve the
+          # .smt2 prover input files that the next step collects, use
+          # --debug-save-vcs, which stops gnatprove from deleting intermediate
+          # prover files after each check.
+          alr exec -- gnatprove -P siunertaq.gpr --prover=cvc5 --debug-save-vcs
+
+      - name: Aggregate SMT2 artifacts
+        if: always()
+        run: |
+          # Establish the staging directory for extracted SMT-LIB v2 artifacts
+          STAGING_DIR="${{ github.workspace }}/ci-out/smt2-artifacts/ada-cvc5"
+          mkdir -p "$STAGING_DIR"
+
+          if [ -d "obj/gnatprove" ]; then
+            find obj/gnatprove -name "*.smt2" -exec cp {} "$STAGING_DIR/" \;
+          fi
+
+      - name: Persist verification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smt2-verification-artifacts
+          path: ci-out/smt2-artifacts/
+          retention-days: 7

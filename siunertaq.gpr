@@ -1,0 +1,12 @@
+project Siunertaq is
+
+   -- Configure root-level directory layout for source and compilation artifacts
+   for Source_Dirs use ("src");
+   for Object_Dir use "obj";
+
+   package Prove is
+      -- Establish semantic analysis and verification switches optimized for CVC5
+      for Switches use ("--prover=cvc5", "--report=all");
+   end Prove;
+
+end Siunertaq;
