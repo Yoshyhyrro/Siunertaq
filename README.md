@@ -361,7 +361,7 @@ examples/
 ## Release Notes
 
 See the [GitHub Releases](../../releases) page for the full changelog.
-The most recent release is **[v0.1.0-beta.3](../../releases/tag/v0.1.0-beta.3)** —
+The most recent release is **[v0.1.1.alpha.1](../../releases/tag/v0.1.1.alpha.1)** —
 shared StackInstr JSON, `Siunertaq::StackMachine.pm`, and full `PerlBridgeSpec` green (32/32).
 
 ## Current status
