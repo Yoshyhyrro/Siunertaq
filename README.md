@@ -397,8 +397,7 @@ shared StackInstr JSON, `Siunertaq::StackMachine.pm`, and full `PerlBridgeSpec` 
 ## Contributing
 
 1. Open an issue before larger design changes.
-2. Branch off `example/jvm-mzv` or the relevant feature branch.
-3. Keep changes focused; prefer lawful additions over convenient ones.
-4. `sbt test` must be green before opening a PR.
+2. Keep changes focused; prefer lawful additions over convenient ones.
+3. `sbt test` must be green before opening a PR.
 
 Contributions that improve proof coverage, solver reliability, or documentation are especially welcome.
