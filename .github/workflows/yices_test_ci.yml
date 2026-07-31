@@ -113,29 +113,43 @@ jobs:
         run: |
           set -euxo pipefail
 
-          # Install Android Command Line Tools
+          # Install a recent JDK if not already present
           sudo apt-get update
-          sudo apt-get install -y android-sdk
+          sudo apt-get install -y openjdk-17-jdk-headless wget unzip
 
-          # Locate d8 executable
-          D8_PATH=$(which d8 || find /usr/lib/android-sdk/build-tools -name d8 2>/dev/null | head -n 1)
+          export ANDROID_HOME="${ANDROID_HOME:-$HOME/android-sdk}"
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
 
-          if [ -z "$D8_PATH" ]; then
-            echo "d8 executable not found"
+          # Download latest command-line tools (update the URL if needed)
+          CMDTOOLS_ZIP=commandlinetools-linux-11076708_latest.zip
+          wget -q "https://dl.google.com/android/repository/${CMDTOOLS_ZIP}" -O /tmp/cmdtools.zip
+          unzip -q /tmp/cmdtools.zip -d "$ANDROID_HOME/cmdline-tools"
+          # Required directory layout
+          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+
+          # Accept licenses non-interactively and install build-tools
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "build-tools;34.0.0" "platform-tools"
+
+          D8_PATH="$ANDROID_HOME/build-tools/34.0.0/d8"
+          if [ ! -x "$D8_PATH" ]; then
+            echo "d8 not found at $D8_PATH"
+            find "$ANDROID_HOME" -name d8 || true
             exit 1
           fi
 
-          # Verify each module's JAR directory matching ci-out/jars/<module>
+          echo "Using d8 at: $D8_PATH"
+
           for mod in core batch-bridge postgres-bridge; do
             src_dir="ci-out/jars/$mod"
             out_dir="ci-out/dex/$mod"
-
             if [ -d "$src_dir" ]; then
               jars=$(find "$src_dir" -type f -name "*.jar")
               if [ -n "$jars" ]; then
                 echo "=== Verifying DEX compatibility for module: $mod ==="
                 mkdir -p "$out_dir"
-                # Convert compiled bytecode to DEX format without running desugaring checks for missing libs
                 "$D8_PATH" --release --no-desugaring --output "$out_dir" $jars
               fi
             fi
