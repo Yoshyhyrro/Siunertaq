@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - example/feature/alire_pm_test
+      - example/feature/d8_test
     paths:
       - build.sbt
       - modules/core/**
@@ -106,6 +106,34 @@ jobs:
             "core/package"             \
             "batchBridge/package"      \
             "postgresBridge/package"
+      - name: Set up Android SDK & Verify DEX compatibility
+        if: success()
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          # Install Android Command Line Tools & build-tools (d8)
+          sudo apt-get update
+          sudo apt-get install -y android-sdk
+
+          # Locate d8 tool (provided by android-sdk / build-tools)
+          D8_PATH=$(which d8 || find /usr/lib/android-sdk/build-tools -name d8 2>/dev/null | head -n 1)
+
+          if [ -z "$D8_PATH" ]; then
+            echo "d8 tool not found"
+            exit 1
+          fi
+
+          mkdir -p ci-out/dex
+
+          # Run d8 conversion check against packaged JARs
+          # If bytecode or unsupported API issues exist, d8 will fail here
+          for jar in $(find ci-out/jars -name "*.jar"); do
+            echo "Verifying Android DEX compatibility for: $jar"
+            "$D8_PATH" --release --output ci-out/dex/ "$jar"
+          done
+
+          echo "DEX verification succeeded! All JARs are valid for Android ART."
 
       - name: Collect common library artifacts
         if: success()
