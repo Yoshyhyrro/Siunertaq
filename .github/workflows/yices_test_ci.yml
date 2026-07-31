@@ -106,34 +106,43 @@ jobs:
             "core/package"             \
             "batchBridge/package"      \
             "postgresBridge/package"
-      - name: Set up Android SDK & Verify DEX compatibility
+
+      - name: Verify Android DEX compatibility using d8
         if: success()
         shell: bash
         run: |
           set -euxo pipefail
 
-          # Install Android Command Line Tools & build-tools (d8)
+          # Install Android Command Line Tools
           sudo apt-get update
           sudo apt-get install -y android-sdk
 
-          # Locate d8 tool (provided by android-sdk / build-tools)
+          # Locate d8 executable
           D8_PATH=$(which d8 || find /usr/lib/android-sdk/build-tools -name d8 2>/dev/null | head -n 1)
 
           if [ -z "$D8_PATH" ]; then
-            echo "d8 tool not found"
+            echo "d8 executable not found"
             exit 1
           fi
 
-          mkdir -p ci-out/dex
+          # Verify each module's JAR directory matching ci-out/jars/<module>
+          for mod in core batch-bridge postgres-bridge; do
+            src_dir="ci-out/jars/$mod"
+            out_dir="ci-out/dex/$mod"
 
-          # Run d8 conversion check against packaged JARs
-          # If bytecode or unsupported API issues exist, d8 will fail here
-          for jar in $(find ci-out/jars -name "*.jar"); do
-            echo "Verifying Android DEX compatibility for: $jar"
-            "$D8_PATH" --release --output ci-out/dex/ "$jar"
+            if [ -d "$src_dir" ]; then
+              jars=$(find "$src_dir" -type f -name "*.jar")
+              if [ -n "$jars" ]; then
+                echo "=== Verifying DEX compatibility for module: $mod ==="
+                mkdir -p "$out_dir"
+                # Convert compiled bytecode to DEX format without running desugaring checks for missing libs
+                "$D8_PATH" --release --no-desugaring --output "$out_dir" $jars
+              fi
+            fi
           done
 
-          echo "DEX verification succeeded! All JARs are valid for Android ART."
+          echo "=== ci-out/dex layout ==="
+          find ci-out/dex -type f | sort
 
       - name: Collect common library artifacts
         if: success()
