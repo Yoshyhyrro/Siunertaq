@@ -1,6 +1,8 @@
 {:paths ["src/main/clojure"]
+ ;; Add Clojars to maven repositories
+ :mvn/repos {"clojars" {:url "https://repo.clojars.org/"}}
  :deps {dhall-clj/dhall-clj {:mvn/version "0.2.1"}}
-        ;; add other modules as needed, e.g.
-        ;; org.dhallj/dhall-parser {:mvn/version "0.10.0-M1"}
-        
+ ;; add other modules as needed, e.g.
+ ;; org.dhallj/dhall-parser {:mvn/version "0.10.0-M1"}
+
  :aliases {:run {:main-opts ["-m" "siunertaq.batch-runner"]}}}
