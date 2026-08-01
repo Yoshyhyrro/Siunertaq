@@ -174,4 +174,4 @@ in    { job_name = "SiunertaqBatch"
             , priority    = 3
             }
           ]
-      } : BatchJobDef
+      }
