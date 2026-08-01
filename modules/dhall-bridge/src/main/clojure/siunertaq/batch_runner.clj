@@ -1,5 +1,5 @@
 (ns siunertaq.batch-runner
-  (:require [dhall.core :as dhall]))
+  (:require [dhall-clj.core :as dhall]))
 
 ;; ==========================================
 ;; 1. JCL COND Statement Evaluation
