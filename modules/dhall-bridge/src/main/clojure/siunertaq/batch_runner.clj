@@ -77,8 +77,12 @@
 (defn -main []
   (try
     (println "Loading Batch Job definition directly via dhall-clojure...")
-    ;; Use dhall/input instead of non-existent dhall/load function
-    (let [job-def (dhall/input "./src/main/resources/BatchJob.dhall")]
-      (run-job! job-def))
+    (let [dhall-file (io/file "src/main/resources/BatchJob.dhall")]
+      (if (.exists dhall-file)
+        ;; Read file content and pass string to dhall/input
+        (let [job-def (dhall/input (slurp dhall-file))]
+          (run-job! job-def))
+        (println "Error: Dhall file not found at" (.getAbsolutePath dhall-file))))
     (catch Exception e
-      (println "Failed to load or execute job:" (.getMessage e)))))
+      (println "Failed to load or execute job:" (.getMessage e))
+      (.printStackTrace e))))
