@@ -1,5 +1,7 @@
+;; Refactor namespace declaration to include Java I/O utilities
 (ns siunertaq.batch-runner
-  (:require [dhall-clj.core :as dhall]))
+  (:require [dhall-clj.core :as dhall]
+            [clojure.java.io :as io]))
 
 ;; ==========================================
 ;; 1. JCL COND Statement Evaluation
