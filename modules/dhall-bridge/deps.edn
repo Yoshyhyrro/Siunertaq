@@ -5,4 +5,11 @@
  ;; add other modules as needed, e.g.
  ;; org.dhallj/dhall-parser {:mvn/version "0.10.0-M1"}
 
- :aliases {:run {:main-opts ["-m" "siunertaq.batch-runner"]}}}
+ :aliases
+ {:run {:main-opts ["-m" "siunertaq.batch-runner"]}
+
+  ;; Test runner configuration
+  :test {:extra-paths ["test/main/clojure"]
+         :main-opts   ["-m" "cognitect.test-runner"]
+         :extra-deps  {com.cognitect/test-runner {:git/url "https://github.com/cognitect-labs/test-runner"
+                                                  :sha     "dfb30e9235db31e5d9545801193d207357ac8e0c"}}}}}
