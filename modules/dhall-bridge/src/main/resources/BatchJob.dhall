@@ -128,7 +128,8 @@ let mkCond =
       \(t : Natural) -> \(op : CondOp) ->
         Some (CondExpr.Compare { tag = CondExprTag.Compare, threshold = t, op = op })
 
-in    { job_name = "SiunertaqBatch"
+let job : BatchJobDef =
+      { job_name = "SiunertaqBatch"
       , prime    = 7
       , steps    =
           [ -- STEP1: Leech -> AffineDual (Frobenius; executes always)
@@ -175,3 +176,5 @@ in    { job_name = "SiunertaqBatch"
             }
           ]
       }
+
+in  job
