@@ -77,8 +77,8 @@
 (defn -main []
   (try
     (println "Loading Batch Job definition directly via dhall-clojure...")
-    ;; Load and parse the Dhall configuration completely in-memory (no I/O piping needed)
-    (let [job-def (dhall/load "./src/main/resources/BatchJob.dhall")]
+    ;; Use dhall/input instead of non-existent dhall/load function
+    (let [job-def (dhall/input "./src/main/resources/BatchJob.dhall")]
       (run-job! job-def))
     (catch Exception e
       (println "Failed to load or execute job:" (.getMessage e)))))
