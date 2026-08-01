@@ -25,12 +25,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Clojure CLI
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clojure
+      # Official Setup Clojure Action
+      - name: Setup Clojure
+        uses: DeLaGuardo/setup-clojure@5.0
+        with:
+          cli: 'latest'
 
       - name: Run Clojure batch runner
-        run: |
-          cd modules/dhall-bridge
-          clojure -M:run
+        working-directory: modules/dhall-bridge
+        run: clojure -M:run
