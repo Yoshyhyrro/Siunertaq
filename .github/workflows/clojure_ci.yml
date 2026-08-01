@@ -1,0 +1,36 @@
+name: Clojure Batch Runner CI
+
+on:
+  push:
+    branches:
+      - "example/feature/clojure_Alexander–Hodge"
+    paths:
+      - modules/dhall-bridge/**
+      - .github/workflows/clojure_ci.yml
+  workflow_dispatch: {}
+
+jobs:
+  run-clojure:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Clojure CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clojure
+
+      - name: Run Clojure batch runner
+        run: |
+          cd modules/dhall-bridge
+          clojure -M:run

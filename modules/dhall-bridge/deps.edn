@@ -1,0 +1,3 @@
+{:paths ["src/main/clojure"]
+ :deps {org.dhallj/dhall-clojure {:mvn/version "0.10.0-M1"}}
+ :aliases {:run {:main-opts ["-m" "siunertaq.batch-runner"]}}}
