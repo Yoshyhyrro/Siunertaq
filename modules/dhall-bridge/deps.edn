@@ -1,14 +1,15 @@
 {:paths ["src/main/clojure"]
  ;; Add Clojars to maven repositories
  :mvn/repos {"clojars" {:url "https://repo.clojars.org/"}}
- :deps {;; Replace dhall-clj with cheshire for parsing JSON output from external dhall-to-json CLI
-        cheshire/cheshire {:mvn/version "5.11.0"}}
+ :deps {cheshire/cheshire {:mvn/version "5.11.0"}}
 
  :aliases
  {:run {:main-opts ["-m" "siunertaq.batch-runner"]}
 
   ;; Test runner configuration
   :test {:extra-paths ["test/main/clojure"]
+         :extra-deps  {io.github.cognitect-labs/test-runner
+                       {:git/tag "v0.5.1"
+                        :git/sha "dfb30dd"}}
          :main-opts   ["-m" "cognitect.test-runner"]
-         :extra-deps  {com.cognitect/test-runner {:git/url "https://github.com/cognitect-labs/test-runner"
-                                                  :sha     "dfb30e9235db31e5d9545801193d207357ac8e0c"}}}}}
+         :exec-fn     cognitect.test-runner.api/test}}}
