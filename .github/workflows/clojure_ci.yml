@@ -3,7 +3,7 @@ name: Clojure Batch Runner CI
 on:
   push:
     branches:
-      - "example/feature/clojure_Alexander–Hodge"
+      - "example/feature/clojure_Alexander-Hodge"
     paths:
       - modules/dhall-bridge/**
       - .github/workflows/clojure_ci.yml
@@ -37,7 +37,7 @@ jobs:
           curl -sSL https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-json-1.7.11-x86_64-Linux.tar.bz2 | tar -xj
           sudo mv bin/dhall-to-json /usr/local/bin/
           dhall-to-json --version
-          
+
       - name: Run Clojure batch runner
         working-directory: modules/dhall-bridge
         run: clojure -M:run
