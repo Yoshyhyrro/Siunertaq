@@ -3,7 +3,7 @@ name: Clojure Batch Runner CI
 on:
   push:
     branches:
-      - "example/feature/clojure_Alexander-Hodge"
+      - "example/feature/clojure_Alexander–Hodge"
     paths:
       - modules/dhall-bridge/**
       - .github/workflows/clojure_ci.yml
