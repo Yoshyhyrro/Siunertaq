@@ -6,6 +6,9 @@
 /.bsp/
 /.bloop/
 
+# Clojure / Leiningen
+.clj-kondo/
+
 # Coursier / caches
 /.coursier/
 /.cache/
