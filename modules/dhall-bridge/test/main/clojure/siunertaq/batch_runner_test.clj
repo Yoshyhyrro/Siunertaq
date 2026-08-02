@@ -11,7 +11,8 @@
                                            ;; Return specific RC based on step name
                                            (case (:name step)
                                              "step-1" 0
-                                             "step-2" 8  ; Causes step-3 to skip
+                                             ;; RC=8 becomes previous-rc for step-3's COND check below
+                                             "step-2" 8
                                              "step-3" 0
                                              0))]
 
@@ -44,7 +45,9 @@
 (deftest avx2-simd-instruction-mock-test
   (testing "Simulates AVX2 SIMD execution pipeline for Stack Machine vector operations"
     (let [ymm-dot-product-mock (fn [reg-a reg-b]
-                                 ;; Simulates a fused multiply-add (FMA) across 256-bit YMM registers
+                                 ;; Accumulates a dot product the way a sequence of AVX2
+                                 ;; VFMADD (fused multiply-add) instructions would on real
+                                 ;; 256-bit YMM registers: sum_i (reg-a[i] * reg-b[i]).
                                  (reduce + (map * reg-a reg-b)))]
 
       (with-redefs [runner/execute-step!
@@ -54,11 +57,14 @@
                                                        (contains? % :DotVec3))
                                                   instructions)]
                         (if has-vector-ops?
-                          (let [;; Allocate simulated 256-bit YMM registers (8x 32-bit float lanes)
+                          (let [;; Allocate simulated 256-bit YMM registers (8x 32-bit float lanes).
+                                ;; Only lanes 0-2 carry the vec3 payload from :input_prog below
+                                ;; (x=2,y=4,z=0) and (x=1,y=0,z=8); lanes 3-7 are zero-padded
+                                ;; and do not affect the sum.
                                 ymm-reg-0 [2.0 4.0 0.0 0.0 0.0 0.0 0.0 0.0]
                                 ymm-reg-1 [1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0]
                                 result    (ymm-dot-product-mock ymm-reg-0 ymm-reg-1)]
-                            ;; Assert the hardware mock computes the correct dot product scalar
+                            ;; Expected: (2*1) + (4*0) + (0*8) + 0x5 = 2.0
                             (is (= 2.0 result) "SIMD dot product execution should yield correct scalar value")
                             ;; Return execution RC 0 on success
                             0)
@@ -70,7 +76,9 @@
                                       :cond nil
                                       :norm_vertex "Padic"
                                       :effect_tag "oplus_padic"
-                                      ;; AST payload mimicking parsed Dhall JSON output
+                                      ;; AST payload mimicking parsed Dhall JSON output.
+                                      ;; These vec3 values match ymm-reg-0 (2,4,0) and
+                                      ;; ymm-reg-1 (1,0,8) in the mocked executor above.
                                       :input_prog [{:PushVec3 {:x 2 :y 4 :z 0}}
                                                    {:PushVec3 {:x 1 :y 0 :z 8}}
                                                    {:DotVec3 {}}]}]}]
