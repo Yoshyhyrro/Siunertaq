@@ -7,7 +7,9 @@
 
 (defn interleave-bits-3d
   "Interleaves 10-bit integer coordinates (x, y, z) into a 30-bit Morton Code.
-   Maintains spatial locality for GPU Shader SSBO access."
+   Maintains spatial locality for GPU Shader SSBO access.
+   Bit assignment: x occupies bit 0 of each triplet, y bit 1, z bit 2
+   (i.e. bit layout ...z2 y2 x2 z1 y1 x1 z0 y0 x0), matching the shifts below."
   [x y z]
   (letfn [(expand-bits [v]
             (let [v (bit-and v 0x000003ff)
@@ -85,6 +87,9 @@
       (is (= 0 (:morton (first morton-packed-buffer))))
       (is (= 7 (:morton (nth morton-packed-buffer 2))))
 
-      ;; Assert Compute Shader multiply operation on GPU
+      ;; Assert Compute Shader multiply operation on GPU (each node's val * 2.0,
+      ;; per the `nodes[gid].val = nodes[gid].val * 2.0;` shader body above)
+      ;; index 0: (0,0,0) val=1.5 -> 1.5 * 2.0 = 3.0
       (is (= 3.0 (:val (first gpu-processed-buffer))))
+      ;; index 2: (1,1,1) val=3.5 -> 3.5 * 2.0 = 7.0
       (is (= 7.0 (:val (nth gpu-processed-buffer 2)))))))
