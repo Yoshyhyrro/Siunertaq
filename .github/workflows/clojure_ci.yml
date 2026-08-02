@@ -34,10 +34,10 @@ jobs:
       # Install dhall-to-json binary for Clojure runner
       - name: Install Dhall CLI
         run: |
-          curl -sSL https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-json-1.41.2-x86_64-linux.tar.bz2 | tar -xj
+          curl -sSL https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-json-1.7.11-x86_64-Linux.tar.bz2 | tar -xj
           sudo mv bin/dhall-to-json /usr/local/bin/
           dhall-to-json --version
-
+          
       - name: Run Clojure batch runner
         working-directory: modules/dhall-bridge
         run: clojure -M:run
