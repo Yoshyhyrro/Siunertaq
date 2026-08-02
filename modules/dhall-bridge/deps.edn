@@ -7,23 +7,22 @@
  {:run
   {:main-opts ["-m" "siunertaq.batch-runner"]}
 
-  ;; Unit tests using clojure.test / test.check generators.
+  ;; Runs the existing clojure.test namespaces
+  ;; (siunertaq.batch-runner-test, siunertaq.opengl-morton-test, etc.)
+  ;; via cognitect-labs/test-runner, which auto-discovers *_test.clj files
+  ;; under :extra-paths. There is no siunertaq/test_runner.clj in this repo,
+  ;; so do NOT invoke this with `-M:test -m siunertaq.test-runner` --
+  ;; that namespace does not exist. Invoke with:
+  ;;   clojure -X:test
   ;; NOTE: org.clojure/test.generative.junit does not exist as a published
   ;; Maven artifact -- JUnit support ships inside test.generative itself,
   ;; not as a separate jar. Do not re-add it.
   :test
   {:extra-paths ["test/main/clojure"]
    :extra-deps {org.clojure/test.check {:mvn/version "1.1.0"}
-                org.clojure/test.generative {:mvn/version "0.5.2"}}
-   :main-opts ["-m" "siunertaq.test-runner"]}
-
-  ;; cognitect-labs/test-runner is only published via git, not Maven Central.
-  ;; Update :git/sha to the commit matching the desired :git/tag.
-  :test-runner
-  {:extra-paths ["test/main/clojure"]
-   :extra-deps {io.github.cognitect-labs/test-runner
+                org.clojure/test.generative {:mvn/version "0.5.2"}
+                io.github.cognitect-labs/test-runner
                 {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
-   :main-opts ["-m" "cognitect.test-runner"]
    :exec-fn cognitect.test-runner.api/test}
 
   ;; LWJGL 3 (OpenGL + GLFW).
