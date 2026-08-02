@@ -5,11 +5,10 @@
 
 (deftest alexander-hodge-traversal-test
   (testing "Validates state propagation across job steps without relying on linked-list traversal"
-    ;; Mock step execution to simulate different return codes
     (let [step-execution-count (atom 0)]
       (with-redefs [runner/execute-step! (fn [step]
                                            (swap! step-execution-count inc)
-                                           ;; Return specific Return Code (RC) based on step name
+                                           ;; Return specific RC based on step name
                                            (case (:name step)
                                              "step-1" 0
                                              "step-2" 8  ; Causes step-3 to skip
@@ -17,10 +16,11 @@
                                              0))]
 
         (let [mock-job {:job_name "HodgeTraversalJob"
+                        ;; Steps are intentionally out of order to test stateful traversal
                         :steps [{:name "step-1" :cond nil}
-                                ;; COND=(4, LT): Skip if 4 < previous RC (4 < 8 is true -> skipped)
-                                {:name "step-3" :cond {:Compare {:threshold 4 :op "LT"}}}
-                                {:name "step-2" :cond nil}]}]
+                                {:name "step-2" :cond nil}
+                                ;; COND=(4, LT): Skip if 4 < previousRC (4 < 8 is true -> skipped)
+                                {:name "step-3" :cond {:Compare {:threshold 4 :op "LT"}}}]}]
 
           ;; Execute job traversal
           (runner/run-job! mock-job)
@@ -32,14 +32,14 @@
   (testing "Verifies JCL COND algebraic semantics against previous RC state"
     ;; Compare operator cases
     (let [cond-lt {:Compare {:threshold 4 :op "LT"}}]
-      ;; COND=(4, LT) -> skip if 4 < RC
       (is (true?  (runner/evaluate-cond cond-lt 0 false)) "RC=0: 4 < 0 is false -> Execute")
       (is (false? (runner/evaluate-cond cond-lt 8 false)) "RC=8: 4 < 8 is true  -> Skip"))
 
     ;; Only operator (ABEND recovery)
     (let [cond-only {:Only {}}]
-      (is (false? (runner/evaluate-cond cond-only 0 false) "Normal: Skip recovery"))
-      (is (true?  (runner/evaluate-cond cond-only 0 true)  "ABEND: Execute recovery")))))
+      ;; Normal execution should skip recovery step
+      (is (false? (runner/evaluate-cond cond-only 0 false)) "Normal: Skip recovery")
+      (is (true?  (runner/evaluate-cond cond-only 0 true))  "ABEND: Execute recovery"))))
 
 (deftest avx2-simd-instruction-mock-test
   (testing "Simulates AVX2 SIMD execution pipeline for Stack Machine vector operations"
@@ -58,7 +58,7 @@
                                 ymm-reg-0 [2.0 4.0 0.0 0.0 0.0 0.0 0.0 0.0]
                                 ymm-reg-1 [1.0 0.0 8.0 0.0 0.0 0.0 0.0 0.0]
                                 result    (ymm-dot-product-mock ymm-reg-0 ymm-reg-1)]
-                            ;; Assert the hardware mock computes the correct dot product scalar (2.0*1.0 + 4.0*0.0 + 0.0*8.0 = 2.0)
+                            ;; Assert the hardware mock computes the correct dot product scalar
                             (is (= 2.0 result) "SIMD dot product execution should yield correct scalar value")
                             ;; Return execution RC 0 on success
                             0)
