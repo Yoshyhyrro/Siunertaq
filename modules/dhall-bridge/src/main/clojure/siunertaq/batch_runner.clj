@@ -90,6 +90,19 @@
                        :error-msg err
                        :file file-path})))))
 
+
+;; Helper to locate the resource file across different working directories
+(defn resolve-dhall-path
+  "Resolves the absolute path for BatchJob.dhall by checking potential candidate paths."
+  []
+  (let [candidate-paths ["src/main/resources/BatchJob.dhall"
+                         "modules/dhall-bridge/src/main/resources/BatchJob.dhall"]]
+    (some (fn [path]
+            (let [file (io/file path)]
+              (when (.exists file)
+                (.getAbsolutePath file))))
+          candidate-paths)))
+
 ;; ==========================================
 ;; 5. Execution Entry Point
 ;; ==========================================
@@ -97,11 +110,10 @@
 (defn -main []
   (try
     (println "Loading Batch Job definition via external dhall-to-json CLI...")
-    (let [dhall-path "modules/dhall-bridge/src/main/resources/BatchJob.dhall"]
-      (if (.exists (io/file dhall-path))
-        (let [job-def (load-dhall-config dhall-path)]
-          (run-job! job-def))
-        (println "Error: Dhall file not found at" dhall-path)))
+    (if-let [dhall-path (resolve-dhall-path)]
+      (let [job-def (load-dhall-config dhall-path)]
+        (run-job! job-def))
+      (println "Error: BatchJob.dhall not found in default candidate paths."))
     (catch Exception e
       (println "Failed to load or execute job:" (.getMessage e))
       (.printStackTrace e))))
