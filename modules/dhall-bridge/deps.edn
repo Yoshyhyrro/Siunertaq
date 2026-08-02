@@ -1,15 +1,51 @@
+;; modules/dhall-bridge/deps.edn
 {:paths ["src/main/clojure"]
- ;; Add Clojars to maven repositories
  :mvn/repos {"clojars" {:url "https://repo.clojars.org/"}}
  :deps {cheshire/cheshire {:mvn/version "5.11.0"}}
 
  :aliases
- {:run {:main-opts ["-m" "siunertaq.batch-runner"]}
+ {:run
+  {:main-opts ["-m" "siunertaq.batch-runner"]}
 
-  ;; Test runner configuration
-  :test {:extra-paths ["test/main/clojure"]
-         :extra-deps  {io.github.cognitect-labs/test-runner
-                       {:git/tag "v0.5.1"
-                        :git/sha "dfb30dd"}}
-         :main-opts   ["-m" "cognitect.test-runner"]
-         :exec-fn     cognitect.test-runner.api/test}}}
+  ;; Unit tests using clojure.test / test.check generators
+  :test
+  {:extra-paths ["test/main/clojure"]
+   :extra-deps {org.clojure/test.check {:mvn/version "1.1.0"}
+                org.clojure/test.generative {:mvn/version "0.5.0"}
+                org.clojure/test.generative.junit {:mvn/version "0.5.0"}}
+   :main-opts ["-m" "siunertaq.test-runner"]}
+
+  ;; cognitect-labs/test-runner is only published via git, not Maven Central.
+  ;; Update :git/sha to the commit matching the desired :git/tag.
+  :test-runner
+  {:extra-paths ["test/main/clojure"]
+   :extra-deps {io.github.cognitect-labs/test-runner
+                {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+   :main-opts ["-m" "cognitect.test-runner"]
+   :exec-fn cognitect.test-runner.api/test}
+
+  ;; LWJGL 3 (OpenGL + GLFW).
+  ;; A single lib symbol can only map to one Maven coordinate, so the same
+  ;; artifact cannot carry two different :classifier values in one alias.
+  ;; Use the shared :render alias for the platform-independent jars, plus
+  ;; exactly one platform-specific alias (:render-windows / :render-linux /
+  ;; :render-macos) selected at invocation time, e.g. `clj -M:render:render-linux`.
+  :render
+  {:extra-deps {org.lwjgl/lwjgl {:mvn/version "3.4.2"}
+                org.lwjgl/lwjgl-glfw {:mvn/version "3.4.2"}
+                org.lwjgl/lwjgl-opengl {:mvn/version "3.4.2"}}}
+
+  :render-windows
+  {:extra-deps {org.lwjgl/lwjgl {:mvn/version "3.4.2" :classifier "natives-windows"}
+                org.lwjgl/lwjgl-glfw {:mvn/version "3.4.2" :classifier "natives-windows"}
+                org.lwjgl/lwjgl-opengl {:mvn/version "3.4.2" :classifier "natives-windows"}}}
+
+  :render-linux
+  {:extra-deps {org.lwjgl/lwjgl {:mvn/version "3.4.2" :classifier "natives-linux"}
+                org.lwjgl/lwjgl-glfw {:mvn/version "3.4.2" :classifier "natives-linux"}
+                org.lwjgl/lwjgl-opengl {:mvn/version "3.4.2" :classifier "natives-linux"}}}
+
+  :render-macos
+  {:extra-deps {org.lwjgl/lwjgl {:mvn/version "3.4.2" :classifier "natives-macos"}
+                org.lwjgl/lwjgl-glfw {:mvn/version "3.4.2" :classifier "natives-macos"}
+                org.lwjgl/lwjgl-opengl {:mvn/version "3.4.2" :classifier "natives-macos"}}}}}
