@@ -1,6 +1,7 @@
-;; Refactor namespace declaration to include Java I/O utilities
+;; Refactor namespace declaration to use clojure.java.shell and cheshire instead of dhall-clj
 (ns siunertaq.batch-runner
-  (:require [dhall-clj.core :as dhall]
+  (:require [clojure.java.shell :as shell]
+            [cheshire.core :as json]
             [clojure.java.io :as io]))
 
 ;; ==========================================
@@ -21,7 +22,7 @@
         "Only" abended?
         "Compare"
         (let [threshold (:threshold expr)
-              ;; Handle both raw string "LT" and map {"LT" {}} union representations from DhallJ
+              ;; Handle both raw string "LT" and map {"LT" {}} union representations
               op        (if (map? (:op expr)) (-> expr :op keys first name) (:op expr))]
           (not (case op
                  "LT" (< threshold previous-rc)
@@ -73,18 +74,34 @@
               (recur (rest remaining-steps) previous-rc abended?))))))))
 
 ;; ==========================================
-;; 4. Execution Entry Point
+;; 4. Dhall Config Loader via Subprocess
+;; ==========================================
+
+(defn load-dhall-config [file-path]
+  "Evaluates Dhall definition using external dhall-to-json process,
+   returning parsed JSON structure as Clojure hash-map with keyword keys."
+  (let [dhall-bin (or (System/getenv "DHALL_TO_JSON") "dhall-to-json")
+        abs-file  (io/file file-path)
+        {:keys [exit out err]} (shell/sh dhall-bin "--file" (.getAbsolutePath abs-file))]
+    (if (zero? exit)
+      (json/parse-string out true)
+      (throw (ex-info (str "dhall-to-json execution failed (exit " exit ")")
+                      {:exit-code exit
+                       :error-msg err
+                       :file file-path})))))
+
+;; ==========================================
+;; 5. Execution Entry Point
 ;; ==========================================
 
 (defn -main []
   (try
-    (println "Loading Batch Job definition directly via dhall-clojure...")
-    (let [dhall-file (io/file "src/main/resources/BatchJob.dhall")]
-      (if (.exists dhall-file)
-        ;; Read file content and pass string to dhall/input
-        (let [job-def (dhall/input (slurp dhall-file))]
+    (println "Loading Batch Job definition via external dhall-to-json CLI...")
+    (let [dhall-path "modules/dhall-bridge/src/main/resources/BatchJob.dhall"]
+      (if (.exists (io/file dhall-path))
+        (let [job-def (load-dhall-config dhall-path)]
           (run-job! job-def))
-        (println "Error: Dhall file not found at" (.getAbsolutePath dhall-file))))
+        (println "Error: Dhall file not found at" dhall-path)))
     (catch Exception e
       (println "Failed to load or execute job:" (.getMessage e))
       (.printStackTrace e))))
