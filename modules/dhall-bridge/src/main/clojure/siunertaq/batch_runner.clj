@@ -16,7 +16,12 @@
     true ;; No COND specified: execute unconditionally
     (let [;; Extract payload from Dhall union projection (handles potential map wrapping)
           expr (or (:Compare cond-val) (:Even cond-val) (:Only cond-val) cond-val)
-          tag  (:tag expr)]
+          tag  (or (:tag expr)
+                   (cond
+                     (or (:Compare cond-val) (contains? expr :threshold)) "Compare"
+                     (contains? cond-val :Even) "Even"
+                     (contains? cond-val :Only) "Only"
+                     :else nil))]
       (case tag
         "Even" true
         "Only" abended?
@@ -30,7 +35,9 @@
                  "EQ" (= threshold previous-rc)
                  "NE" (not= threshold previous-rc)
                  "GT" (> threshold previous-rc)
-                 "GE" (>= threshold previous-rc))))))))
+                 "GE" (>= threshold previous-rc))))
+        ;; Fallback when tag is missing/nil: execute the step by default
+        true))))
 
 ;; ==========================================
 ;; 2. Stack Machine Instruction Runner
