@@ -7,7 +7,13 @@ on:
     paths:
       - modules/dhall-bridge/**
       - .github/workflows/clojure_ci.yml
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: "Skip running Clojure unit tests"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   run-clojure:
@@ -38,6 +44,13 @@ jobs:
           sudo mv bin/dhall-to-json /usr/local/bin/
           dhall-to-json --version
 
+      # Run Unit Tests (Alexander-Hodge traversal & AVX2 SIMD mocks)
+      - name: Run Clojure unit tests
+        if: ${{ inputs.skip_tests != true }}
+        working-directory: modules/dhall-bridge
+        run: clojure -M:test
+
+      # Execute Batch Runner Application
       - name: Run Clojure batch runner
         working-directory: modules/dhall-bridge
         run: clojure -M:run
