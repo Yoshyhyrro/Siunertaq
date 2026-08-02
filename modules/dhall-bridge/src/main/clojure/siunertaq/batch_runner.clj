@@ -93,10 +93,14 @@
 
 ;; Helper to locate the resource file across different working directories
 (defn resolve-dhall-path
-  "Resolves the absolute path for BatchJob.dhall by checking potential candidate paths."
+  "Resolves the absolute path for BatchJob.dhall by checking comprehensive candidate paths
+   across various working directories and module structures."
   []
   (let [candidate-paths ["src/main/resources/BatchJob.dhall"
-                         "modules/dhall-bridge/src/main/resources/BatchJob.dhall"]]
+                         "modules/dhall-bridge/src/main/resources/BatchJob.dhall"
+                         "../src/main/resources/BatchJob.dhall"
+                         "../../src/main/resources/BatchJob.dhall"
+                         "resources/BatchJob.dhall"]]
     (some (fn [path]
             (let [file (io/file path)]
               (when (.exists file)
