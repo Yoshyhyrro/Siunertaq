@@ -7,12 +7,14 @@
  {:run
   {:main-opts ["-m" "siunertaq.batch-runner"]}
 
-  ;; Unit tests using clojure.test / test.check generators
+  ;; Unit tests using clojure.test / test.check generators.
+  ;; NOTE: org.clojure/test.generative.junit does not exist as a published
+  ;; Maven artifact -- JUnit support ships inside test.generative itself,
+  ;; not as a separate jar. Do not re-add it.
   :test
   {:extra-paths ["test/main/clojure"]
    :extra-deps {org.clojure/test.check {:mvn/version "1.1.0"}
-                org.clojure/test.generative {:mvn/version "0.5.0"}
-                org.clojure/test.generative.junit {:mvn/version "0.5.0"}}
+                org.clojure/test.generative {:mvn/version "0.5.2"}}
    :main-opts ["-m" "siunertaq.test-runner"]}
 
   ;; cognitect-labs/test-runner is only published via git, not Maven Central.
