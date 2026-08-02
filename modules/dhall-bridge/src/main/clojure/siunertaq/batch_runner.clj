@@ -50,7 +50,7 @@
   (println (str "         Target Vertex: " (:norm_vertex step)))
   (println (str "         Effect Tag:    " (:effect_tag step)))
   (println (str "         Instructions:  " (count (:input_prog step))))
-  
+
   ;; In a real runtime, we would interpret the JSON payload of :input_prog here.
   ;; For this simulation, we assume successful execution (RC = 0).
   0)
@@ -72,7 +72,7 @@
         (let [current-step (first remaining-steps)
               cond-val     (:cond current-step)]
           (println (str "\nEvaluating step: [" (:name current-step) "] (Current RC=" previous-rc ")"))
-          
+
           (if (evaluate-cond cond-val previous-rc abended?)
             (let [new-rc (execute-step! current-step)]
               (recur (rest remaining-steps) new-rc false))
