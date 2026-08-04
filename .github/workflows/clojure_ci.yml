@@ -1,4 +1,4 @@
-name: Clojure Batch Runner CI
+name: Clojure CI
 
 on:
   push:
@@ -6,6 +6,7 @@ on:
       - "example/feature/clojure_Alexander–Hodge"
     paths:
       - modules/dhall-bridge/**
+      - modules/postgres-bridge/**
       - .github/workflows/clojure_ci.yml
   workflow_dispatch:
     inputs:
@@ -16,7 +17,7 @@ on:
         default: false
 
 jobs:
-  run-clojure:
+  run-clojure-dhall-bridge:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -44,13 +45,46 @@ jobs:
           sudo mv bin/dhall-to-json /usr/local/bin/
           dhall-to-json --version
 
-      # Run Unit Tests (Alexander-Hodge traversal & AVX2 SIMD mocks)
+      # Run Unit Tests (Alexander-Hodge traversal, AVX2 SIMD mocks, and
+      # flock-size diagnostics). The :test alias only has :exec-fn (no
+      # :main-opts) -- there is no siunertaq/test_runner.clj to -m into
+      # -- so this must be invoked with -X, not -M. See deps.edn's
+      # :test alias comment.
       - name: Run Clojure unit tests
         if: ${{ inputs.skip_tests != true }}
         working-directory: modules/dhall-bridge
-        run: clojure -M:test
+        run: clojure -X:test
 
       # Execute Batch Runner Application
       - name: Run Clojure batch runner
         working-directory: modules/dhall-bridge
         run: clojure -M:run
+
+  run-clojure-postgres-bridge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Clojure
+        uses: DeLaGuardo/setup-clojure@5.0
+        with:
+          cli: 'latest'
+
+      # No Dhall CLI and no -main here: this module is currently
+      # test-only (MecrispInstr.stackDelta model-based property tests
+      # cross-checked against each constructor's own doc comment). It
+      # has no :run alias and defines no entry point to execute.
+      - name: Run Clojure unit tests
+        if: ${{ inputs.skip_tests != true }}
+        working-directory: modules/postgres-bridge
+        run: clojure -X:test
