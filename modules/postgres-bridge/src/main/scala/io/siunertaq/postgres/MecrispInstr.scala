@@ -205,26 +205,31 @@ object MecrispInstr:
   /** Stack depth delta for each instruction (None = unknown / control flow). */
   def stackDelta(instr: MecrispInstr): Option[Int] = instr match
     case Literal(_) | CharLit(_) | VariableRef(_) | I | J | Depth | RFetch => Some(+1)
-    case Drop | ToR | Store | CStore | HStore | PlusStore | Emit             => Some(-1)
-    case Plus | Minus | Multiply | Divide | DivMod | Modulo |
+    case Drop | ToR | Emit                                                   => Some(-1)
+    case Store | CStore | HStore | PlusStore                                 => Some(-2)  // ( val/byte/half/n addr -- ): consumes 2, pushes 0
+    case Plus | Minus | Multiply | Divide | Modulo |
          And | Or | Xor | LShift | RShift | URShift |
          Equal | NotEqual | LessThan | GreaterThan | LessEq | GreaterEq |
          ULessThan | UGreaterThan | MaxOp | MinOp                            => Some(-1)
     case Negate | Abs | OnePlus | OneMinus | TwoMul | TwoDiv |
          Invert | ZeroEqual | ZeroLess | ZeroGreater | Fetch | CFetch | HFetch => Some(0)
     case Dup | Over | Tuck | RFetch                                          => Some(+1)
-    case Swap | Rot | NRot | Nip                                             => Some(0)
+    case Swap | Rot | NRot                                                   => Some(0)
+    case Nip                                                                 => Some(-1)  // ( a b -- b ): consumes 2, pushes 1
     case Dup2                                                                => Some(+2)
     case Drop2                                                               => Some(-2)
     case FromR                                                               => Some(+1)
-    case CR | DotS | Exit | Recurse | Loop | PlusLoop | Leave | Again |
-         Begin | Until | While | Repeat | LineComment(_) | BlockComment(_)   => Some(0)
+    case CR | DotS | Exit | Recurse | Loop | Leave | Again |
+         Begin | Repeat | LineComment(_) | BlockComment(_)                   => Some(0)
+    case Until | While                                                       => Some(-1)  // ( flag -- ): consumes 1
+    case PlusLoop                                                            => Some(-1)  // ( n -- ): consumes 1
     case Dot                                                                 => Some(-1)
-    case If | Do                                                             => Some(-1)  // consumes flag/limits
+    case If                                                                  => Some(-1)  // ( flag -- ): consumes 1
+    case Do                                                                  => Some(-2)  // ( limit start -- ): consumes 2
     case Else | Then                                                         => Some(0)
     case Pick(n)                                                             => Some(+1)
     case Call(_)                                                             => None      // depends on word
-    case DivMod                                                              => Some(0)   // consumes 2, pushes 2
+    case DivMod                                                              => Some(0)   // ( a b -- rem quot ): consumes 2, pushes 2
 
   /** Token string for ClickHouse Array(String) storage. */
   def toToken(instr: MecrispInstr): String = toSource(instr)
