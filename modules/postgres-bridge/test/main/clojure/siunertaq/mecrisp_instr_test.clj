@@ -135,8 +135,8 @@
             known-buggy-instrs. If it fails because the set grew, a new
             regression was introduced."
     (let [actual-mismatches (set (for [k checkable-instrs
-                                        :when (not= (get expected-delta k
-                                                     (stack-delta k)))]
+                                        :when (not= (get expected-delta k)
+                                                     (stack-delta k))]
                                     k))]
       (is (= known-buggy-instrs actual-mismatches)))))
 
