@@ -8,6 +8,8 @@
 
 # Clojure / Leiningen
 .clj-kondo/
+modules/dhall-bridge/.cpcache/
+modules/postgres-bridge/.cpcache/
 
 # Coursier / caches
 /.coursier/
