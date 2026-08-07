@@ -29,8 +29,8 @@
 (defn- slurp-lines [path]
   (if-not (.exists (io/file path))
     (throw (ex-info (str "required source file not found: " path
-                          " -- run tests from modules/postgres-bridge"
-                     {:path path})))
+                          " -- run tests from modules/postgres-bridge")
+                     {:path path}))
     (str/split-lines (slurp path))))
 
 (defn parse-ddl-table
@@ -43,14 +43,14 @@
         start-idx (first (keep-indexed #(when (re-find start-re %2) %1) lines))]
     (when-not start-idx
       (throw (ex-info (str "table " table-name " not found in DDL -- has it "
-                            "been renamed or removed?"
-                       {:table table-name}))))
+                            "been renamed or removed?")
+                       {:table table-name})))
     (loop [idx (+ start-idx 2)                              ; skip name line + lone "("
            cols {}]
       (if (>= idx (count lines))
         (throw (ex-info (str "hit end of file before " table-name
-                              "'s closing paren -- DDL format changed?"
-                         {:table table-name})))
+                              "'s closing paren -- DDL format changed?")
+                         {:table table-name}))
         (let [raw (nth lines idx)
               no-comment (first (str/split raw #"--" 2))
               trimmed (str/trim no-comment)]
@@ -121,10 +121,13 @@
 ;; ---- forth_words <-> ClickHouseSync.scala flushWords() ----
 
 (def known-hard-missing-forth-words
-  "literal_constants/min_stack_depth/instruction_count/class_file_hash:
-   none have a DEFAULT, none are Nullable. min_stack_depth's own DDL
-   comment calls it a 'bug indicator', but every row silently reads 0."
-  #{"literal_constants" "min_stack_depth" "instruction_count" "class_file_hash"})
+  "class_file_hash is the one remaining gap after edit_schema_columns.bash:
+   MecrispWordDef carries no hash field, and MecrispCompiler.compile() --
+   the only place a class file's bytes would be available to hash -- has
+   no caller anywhere in this source tree yet. Fabricating a value here
+   would just be a differently-shaped version of the original bug, so
+   this is left as a known, honest gap rather than being filled in."
+  #{"class_file_hash"})
 
 (def known-soft-missing-forth-words
   "has_infinite_loop has DEFAULT 0 -- an explicit, defensible 'not yet
@@ -149,10 +152,10 @@
 ;; ---- bytecode_instructions <-> MecrispCompiler.scala BytecodeRow.toJson ----
 
 (def known-hard-missing-bytecode-instructions
-  "mecrisp_word_name is LowCardinality(String), not Nullable, no DEFAULT --
-   omission silently reads as \"\", losing which instructions are Forth
-   word boundaries."
-  #{"mecrisp_word_name"})
+  "Empty as of edit_schema_columns.bash: mecrisp_word_name is now emitted
+   as word.name (toRows is called once per word, so every row it produces
+   belongs to that word)."
+  #{})
 
 (def known-soft-missing-bytecode-instructions
   "operand_str is Nullable (NULL is a legitimate 'no string operand for
