@@ -206,6 +206,21 @@ final class ClickHouseSyncActor(
         log.error("[CH] ✗ bytecode_instructions: {}", err)
         bytecodeBuf.prependAll(rows)   // retry next tick
 
+  /** Minimum cumulative stack depth reached while executing body, relative
+    * to word entry (0). Negative means the word pops more than it pushes
+    * at some point -- forth_words.min_stack_depth's own DDL comment calls
+    * this a "bug indicator". Uses the (corrected) MecrispInstr.stackDelta. */
+  private def minStackDepth(body: Vector[MecrispInstr]): Int =
+    var depth = 0
+    var minSeen = 0
+    body.foreach { instr =>
+      MecrispInstr.stackDelta(instr).foreach { delta =>
+        depth += delta
+        if depth < minSeen then minSeen = depth
+      }
+    }
+    minSeen
+
   private def flushWords(): Unit =
     if wordBuf.isEmpty then return
     val words   = wordBuf.toVector
@@ -219,7 +234,10 @@ final class ClickHouseSyncActor(
         "stack_effect"       -> w.stackEffect.asJson,
         "body_tokens"        -> w.bodyTokens.asJson,
         "called_words"       -> w.calledWords.toSeq.sorted.asJson,
+        "literal_constants"  -> w.body.collect { case MecrispInstr.Literal(n) => n.toLong }.asJson,
         "max_stack_depth"    -> w.maxStackDepth.asJson,
+        "min_stack_depth"    -> minStackDepth(w.body).asJson,
+        "instruction_count"  -> w.body.size.asJson,
         "has_dead_code"      -> (if w.hasDeadCode then 1 else 0).asJson,
         "is_leaf_word"       -> (if w.directCallees.isEmpty then 1 else 0).asJson,
         "compiled_at"        -> java.time.Instant.now().toString.asJson
