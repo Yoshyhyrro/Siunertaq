@@ -10,6 +10,7 @@
 .clj-kondo/
 modules/dhall-bridge/.cpcache/
 modules/postgres-bridge/.cpcache/
+modules/postgres-bridge/.lsp/
 
 # Coursier / caches
 /.coursier/

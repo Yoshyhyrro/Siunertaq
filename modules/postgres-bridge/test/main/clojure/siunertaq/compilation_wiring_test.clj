@@ -20,21 +20,25 @@
 ;; compiler was available in that file's original sandbox), this file
 ;; calls the real, compiled io.siunertaq.postgres.MecrispCompiler object
 ;; directly -- the "future" interop mecrisp-instr-test.clj's header
-;; deferred. It needs:
-;;   1. `sbt postgresBridge/compile` run first (produces
-;;      target/scala-3/classes)
-;;   2. `clojure -X:test:scala-classes` (not plain `-X:test`) so the
-;;      :scala-classes alias in deps.edn puts those classes plus
-;;      org.scala-lang/scala3-library_3 on the classpath
-;; This sandbox has neither sbt nor network access to Maven Central to
-;; actually run steps 1-2 and confirm this executes; the interop calls
-;; below were written directly against MecrispCompiler.scala's real
-;; current signatures (compile's 4 params, toRows' 2 params,
-;; translateOpcode's opcode table) rather than assumed, but treat this as
-;; unverified until it's actually run once in an environment with the
-;; sbt build available -- if any interop call below has the wrong
-;; signature (e.g. Scala tuple specialization), that's the first thing
-;; to check.
+;; deferred.
+;;
+;; clojure_ci.yml runs `sbt postgresBridge/compile`, then
+;; `sbt export postgresBridge/Compile/fullClasspath` to get this
+;; module's real classpath (compiled classes + every dependency jar --
+;; cats-effect, ASM, pekko, the Scala standard library, all of it),
+;; and passes that to `clojure -Scp` rather than guessing where sbt put
+;; anything. An earlier version of this setup hardcoded a guessed path
+;; (target/scala-3/classes) via deps.edn's :scala-classes alias, which
+;; failed in CI with ClassNotFoundException -- see that alias's comment
+;; in deps.edn for what changed and why. This sandbox has neither sbt
+;; nor network access to Maven Central to run any of this and confirm
+;; the interop calls below actually work; they were written directly
+;; against MecrispCompiler.scala's real current signatures (compile's 4
+;; params, toRows' 2 params, translateOpcode's opcode table) rather than
+;; assumed, but treat this file as unverified until it's actually run
+;; once -- if it still fails, the next thing to check is the interop
+;; calls themselves (e.g. Scala tuple specialization), not the
+;; classpath setup.
 
 ;; ---- 1. Scala interop helpers -------------------------------------------
 
