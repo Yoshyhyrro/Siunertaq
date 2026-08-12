@@ -87,25 +87,39 @@ jobs:
       # depend on (Scala standard library, ASM, cats-effect, etc.) -- on
       # the classpath.
       #
-      # Earlier version of this step guessed the path
-      # (target/scala-3/classes) and hardcoded just the Scala 3 standard
-      # library as an extra dependency via deps.edn's :scala-classes
-      # alias -- that guess was wrong (ClassNotFoundException:
-      # io.siunertaq.postgres.MecrispCompiler in CI). `sbt export` asks
-      # sbt directly for postgresBridge's real, fully-resolved runtime
-      # classpath instead of assuming its shape, so this doesn't depend
-      # on sbt's directory-naming conventions being guessed correctly.
+      # Earlier version #1 guessed the path (target/scala-3/classes) --
+      # wrong (ClassNotFoundException). Version #2 switched to
+      # `sbt export ...fullClasspath`, but sbt's supershell writes ANSI
+      # status-line escape codes straight to stdout regardless of
+      # --error's log-level setting, so the piped output captured a
+      # terminal control sequence instead of the classpath (confirmed:
+      # the captured file was 4 bytes, "\x1b[0J" -- ClassNotFoundException
+      # again, same symptom, different cause). -Dsbt.supershell=false
+      # turns that off at the source; the sed strips any escape codes
+      # that still make it through as a second line of defense; the
+      # final check fails the step immediately with a clear message
+      # instead of leaving another cryptic ClassNotFoundException for
+      # the Clojure step to surface two steps later.
       - name: Setup sbt
         uses: sbt/setup-sbt@v1
 
       - name: Compile postgres-bridge and export its classpath (Scala)
         run: |
           sbt postgresBridge/compile
-          sbt --error 'export postgresBridge/Compile/fullClasspath' \
-            | tail -n 1 > /tmp/postgres-bridge.classpath
-          echo "Exported classpath (first 200 chars):"
-          head -c 200 /tmp/postgres-bridge.classpath
+          sbt -Dsbt.supershell=false --error \
+            'export postgresBridge/Compile/fullClasspath' \
+            | tail -n 1 \
+            | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' \
+            > /tmp/postgres-bridge.classpath
+          echo "Exported classpath length: $(wc -c < /tmp/postgres-bridge.classpath) bytes"
+          echo "First 300 chars:"
+          head -c 300 /tmp/postgres-bridge.classpath
           echo
+          if [ ! -s /tmp/postgres-bridge.classpath ] || \
+             ! grep -q "postgres-bridge" /tmp/postgres-bridge.classpath; then
+            echo "::error::Exported classpath is empty or missing postgres-bridge's own classes -- see the raw output above. sbt's export command or supershell setting may need another look."
+            exit 1
+          fi
 
       # No Dhall CLI and no -main here: this module is currently
       # test-only. It has no :run alias and defines no entry point to
