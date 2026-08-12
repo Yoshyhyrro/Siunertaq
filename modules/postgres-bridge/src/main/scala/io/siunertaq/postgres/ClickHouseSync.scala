@@ -135,8 +135,14 @@ final class ClickHouseSyncActor(
 
   // ── In-memory buffers (mutable; actor is single-threaded) ─────────────────
   private val bytecodeBuf = scala.collection.mutable.ArrayBuffer[MecrispCompiler.BytecodeRow]()
-  private val wordBuf     = scala.collection.mutable.ArrayBuffer[MecrispWordDef]()
-  private val mzvBuf      = scala.collection.mutable.ArrayBuffer[Json]()
+
+  // MecrispWordDef itself carries no classFileHash field (unlike
+  // BytecodeRow, which does) -- pairing it here, rather than extending
+  // MecrispWordDef, keeps the change local to the one place that actually
+  // needs it instead of rippling through compile()'s signature, its
+  // Encoder, and every existing MecrispWordDef construction site.
+  private val wordBuf = scala.collection.mutable.ArrayBuffer[(MecrispWordDef, String)]()
+  private val mzvBuf  = scala.collection.mutable.ArrayBuffer[Json]()
 
   // ── Timer setup ────────────────────────────────────────────────────────────
   override def preStart(): Unit =
@@ -162,7 +168,7 @@ final class ClickHouseSyncActor(
 
       case PushCompilation(payload) =>
         bytecodeBuf ++= payload.rows
-        wordBuf     ++= payload.words
+        wordBuf     ++= payload.words.map(_ -> payload.fileHash)
         log.debug("[CH] buffered {} bytecode rows, {} words", payload.rows.size, payload.words.size)
         if bytecodeBuf.size >= cfg.batchSize then flushAll()
 
@@ -225,7 +231,7 @@ final class ClickHouseSyncActor(
     if wordBuf.isEmpty then return
     val words   = wordBuf.toVector
     wordBuf.clear()
-    val payload = words.map { w =>
+    val payload = words.map { (w, hash) =>
       Json.obj(
         "word_name"          -> w.name.asJson,
         "class_name"         -> w.sourceClass.asJson,
@@ -240,6 +246,7 @@ final class ClickHouseSyncActor(
         "instruction_count"  -> w.body.size.asJson,
         "has_dead_code"      -> (if w.hasDeadCode then 1 else 0).asJson,
         "is_leaf_word"       -> (if w.directCallees.isEmpty then 1 else 0).asJson,
+        "class_file_hash"    -> hash.asJson,
         "compiled_at"        -> java.time.Instant.now().toString.asJson
       ).noSpaces
     }.mkString("\n")
