@@ -11,9 +11,9 @@ package Proof_Target with SPARK_Mode is
    --  Math_Program.Instr_Array so the same arithmetic is pinned
    --  independently in a third language/toolchain.
    Simd_Dot_Product_Demo : constant Instr_Array :=
-     (1 => (Kind => Push_Vec3, Vec_X => 2, Vec_Y => 4, Vec_Z => 0),
+     [1 => (Kind => Push_Vec3, Vec_X => 2, Vec_Y => 4, Vec_Z => 0),
       2 => (Kind => Push_Vec3, Vec_X => 1, Vec_Y => 0, Vec_Z => 8),
-      3 => (Kind => Dot_Vec3));
+      3 => (Kind => Dot_Vec3)];
 
    --  Runs Simd_Dot_Product_Demo through Exec_Program. The Post aspect
    --  below is the actual proof target: under gnatprove, this is a
