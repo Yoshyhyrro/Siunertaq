@@ -38,7 +38,12 @@ import java.security.MessageDigest
 //
 //    ClassASTBridge
 //      .compileClass(classBytes, targetMethod = "execute")
-//      .flatMap(result => clickHouseSync ! PushCompilation(result.words, result.rows, result.fileHash))
+//      .flatMap(result => clickHouseSync ! PushCompilation(
+//        CompilationPayload(result.words, result.rows, result.fileHash)
+//      ))
+//
+//    Or, from a file path directly:
+//      ClassASTBridge.compileFromClassFile(path, clickHouseSync, targetMethod = "execute")
 
 object ClassASTBridge:
 
@@ -214,13 +219,13 @@ object ClassASTBridge:
   //  MecrispCompiler.compile rather than re-deriving className/methodName/
   //  opcodes independently.
   //
-  //  NOTE: MecrispCompiler.compile currently returns only a MecrispWordDef
-  //  (one value per *method*), not the per-instruction breakdown that
-  //  BytecodeRow needs (one row per *instruction* — see instructionIdx).
-  //  That breakdown exists inside compile() today but only as a private
-  //  local val. `rows` is left empty here until MecrispCompiler exposes it,
-  //  rather than being reconstructed by a second implementation of the same
-  //  stack-depth accounting that could silently drift from the original.
+  //  `rows` is produced by MecrispCompiler.toRows(word, classFileHash) —
+  //  the same per-instruction breakdown BytecodeRow needs (one row per
+  //  *instruction*, see instructionIdx), reusing compile()'s own
+  //  stack-depth accounting rather than a second, independently-drifting
+  //  implementation of it. `fileHash` (this call's own MD5, computed once
+  //  below) is threaded through so every row and word produced by this
+  //  compilation carries the same class_file_hash for ClickHouse dedup.
   final case class CompilationResult(
     words:    Vector[MecrispWordDef],
     rows:     Vector[MecrispCompiler.BytecodeRow],
@@ -242,11 +247,38 @@ object ClassASTBridge:
         val hash = ClassFileHash.fromMd5(classBytes).value   // was: inline MessageDigest call
         CompilationResult(
           words    = Vector(word),
-          rows     = MecrispCompiler.toRows(word),            // was: Vector.empty
+          rows     = MecrispCompiler.toRows(word, hash),      // was: Vector.empty, then a 1-arg
+                                                                // call that didn't compile —
+                                                                // toRows needs classFileHash too
           fileHash = hash
         )
       }
   }
+
+  // ── .class file path -> ClickHouseSyncActor (words + rows + hash) ────────
+  //
+  //  Mirrors registerFromClassFile's shape, but for the compileClass path:
+  //  reads a .class file, compiles it, and pushes the result straight to
+  //  ClickHouseSyncActor's protocol. This is the caller compileClass and
+  //  PushCompilation were documented as needing (see the module doc
+  //  comment above) but that did not exist anywhere in the source tree —
+  //  closes the immediate gap. Whatever eventually decides *when* to call
+  //  this (a directory watcher, a CLI entry point, a build-time hook) is
+  //  a separate decision left open here.
+  def compileFromClassFile(
+    path:             java.nio.file.Path,
+    clickHouseSync:   org.apache.pekko.actor.ActorRef,
+    targetMethod:     String         = "execute",
+    targetDescriptor: Option[String] = None,
+    allowStubs:       Boolean        = false
+  ): IO[Unit] =
+    IO.blocking(java.nio.file.Files.readAllBytes(path))
+      .flatMap(compileClass(_, targetMethod, targetDescriptor, allowStubs))
+      .map { result =>
+        clickHouseSync ! ClickHouseSyncProtocol.PushCompilation(
+          ClickHouseSyncProtocol.CompilationPayload(result.words, result.rows, result.fileHash)
+        )
+      }
 
   // ── .class file path -> ForthRegistrar.registerStep() ───────────────────
   def registerFromClassFile(
