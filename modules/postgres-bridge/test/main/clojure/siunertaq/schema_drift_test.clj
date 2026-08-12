@@ -29,8 +29,8 @@
 (defn- slurp-lines [path]
   (if-not (.exists (io/file path))
     (throw (ex-info (str "required source file not found: " path
-                          " -- run tests from modules/postgres-bridge")
-                     {:path path}))
+                         " -- run tests from modules/postgres-bridge")
+                    {:path path}))
     (str/split-lines (slurp path))))
 
 (defn parse-ddl-table
@@ -43,14 +43,14 @@
         start-idx (first (keep-indexed #(when (re-find start-re %2) %1) lines))]
     (when-not start-idx
       (throw (ex-info (str "table " table-name " not found in DDL -- has it "
-                            "been renamed or removed?")
-                       {:table table-name})))
+                           "been renamed or removed?")
+                      {:table table-name})))
     (loop [idx (+ start-idx 2)                              ; skip name line + lone "("
            cols {}]
       (if (>= idx (count lines))
         (throw (ex-info (str "hit end of file before " table-name
-                              "'s closing paren -- DDL format changed?")
-                         {:table table-name}))
+                             "'s closing paren -- DDL format changed?")
+                        {:table table-name}))
         (let [raw (nth lines idx)
               no-comment (first (str/split raw #"--" 2))
               trimmed (str/trim no-comment)]
@@ -81,14 +81,14 @@
   (let [start-idx (first (keep-indexed #(when (re-find start-marker-re %2) %1) lines))]
     (when-not start-idx
       (throw (ex-info "start marker not found -- has the function moved/renamed?"
-                       {:marker (str start-marker-re)})))
+                      {:marker (str start-marker-re)})))
     (let [rest-lines (drop start-idx lines)
           end-offset (first (keep-indexed
-                              #(when (and (pos? %1) (re-find end-marker-re %2)) %1)
-                              rest-lines))]
+                             #(when (and (pos? %1) (re-find end-marker-re %2)) %1)
+                             rest-lines))]
       (when-not end-offset
         (throw (ex-info "end marker not found after start marker"
-                         {:marker (str end-marker-re)})))
+                        {:marker (str end-marker-re)})))
       (set (keep #(second (re-find #"\"([a-zA-Z0-9_]+)\"\s*->" %))
                  (take end-offset rest-lines))))))
 
@@ -121,13 +121,16 @@
 ;; ---- forth_words <-> ClickHouseSync.scala flushWords() ----
 
 (def known-hard-missing-forth-words
-  "class_file_hash is the one remaining gap after edit_schema_columns.bash:
-   MecrispWordDef carries no hash field, and MecrispCompiler.compile() --
-   the only place a class file's bytes would be available to hash -- has
-   no caller anywhere in this source tree yet. Fabricating a value here
-   would just be a differently-shaped version of the original bug, so
-   this is left as a known, honest gap rather than being filled in."
-  #{"class_file_hash"})
+  "FIXED: class_file_hash is now emitted by flushWords(). MecrispWordDef
+   still carries no hash field itself -- ClickHouseSyncActor's wordBuf
+   pairs each buffered word with the class_file_hash from the
+   CompilationPayload it arrived in (PushCompilation's ClassASTBridge
+   caller is the one place a class file's bytes, and therefore its hash,
+   are actually available), rather than fabricating a value or rippling
+   a new field through MecrispCompiler.compile()'s signature. Empty as of
+   this fix; if this ever goes non-empty again, flushWords() and wordBuf
+   have drifted apart from the schema again."
+  #{})
 
 (def known-soft-missing-forth-words
   "has_infinite_loop has DEFAULT 0 -- an explicit, defensible 'not yet
@@ -144,8 +147,8 @@
           scala-lines (slurp-lines "src/main/scala/io/siunertaq/postgres/ClickHouseSync.scala")
           ddl-cols (parse-ddl-table sql-lines "forth_words")
           payload-keys (extract-json-keys scala-lines
-                                           #"private def flushWords"
-                                           #"case Right\(_\)")]
+                                          #"private def flushWords"
+                                          #"case Right\(_\)")]
       (is (= known-hard-missing-forth-words (hard-required-missing ddl-cols payload-keys)))
       (is (= known-soft-missing-forth-words (soft-missing ddl-cols payload-keys))))))
 
@@ -171,8 +174,8 @@
           scala-lines (slurp-lines "src/main/scala/io/siunertaq/postgres/MecrispCompiler.scala")
           ddl-cols (parse-ddl-table sql-lines "bytecode_instructions")
           payload-keys (extract-json-keys scala-lines
-                                           #"def toJson: Json = Json\.obj"
-                                           #"Produce per-instruction rows")]
+                                          #"def toJson: Json = Json\.obj"
+                                          #"Produce per-instruction rows")]
       (is (= known-hard-missing-bytecode-instructions
              (hard-required-missing ddl-cols payload-keys)))
       (is (= known-soft-missing-bytecode-instructions
