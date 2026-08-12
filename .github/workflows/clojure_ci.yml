@@ -83,20 +83,40 @@ jobs:
       # sbt setup + module compile: compilation_wiring_test.clj does real
       # JVM interop into io.siunertaq.postgres.MecrispCompiler (not a
       # transcribed model, unlike mecrisp_instr_test.clj), which needs
-      # this module's actual compiled classes on the classpath -- see
-      # deps.edn's :scala-classes alias for why.
+      # this module's actual compiled classes -- and everything they
+      # depend on (Scala standard library, ASM, cats-effect, etc.) -- on
+      # the classpath.
+      #
+      # Earlier version of this step guessed the path
+      # (target/scala-3/classes) and hardcoded just the Scala 3 standard
+      # library as an extra dependency via deps.edn's :scala-classes
+      # alias -- that guess was wrong (ClassNotFoundException:
+      # io.siunertaq.postgres.MecrispCompiler in CI). `sbt export` asks
+      # sbt directly for postgresBridge's real, fully-resolved runtime
+      # classpath instead of assuming its shape, so this doesn't depend
+      # on sbt's directory-naming conventions being guessed correctly.
       - name: Setup sbt
         uses: sbt/setup-sbt@v1
 
-      - name: Compile postgres-bridge (Scala)
-        run: sbt postgresBridge/compile
+      - name: Compile postgres-bridge and export its classpath (Scala)
+        run: |
+          sbt postgresBridge/compile
+          sbt --error 'export postgresBridge/Compile/fullClasspath' \
+            | tail -n 1 > /tmp/postgres-bridge.classpath
+          echo "Exported classpath (first 200 chars):"
+          head -c 200 /tmp/postgres-bridge.classpath
+          echo
 
       # No Dhall CLI and no -main here: this module is currently
       # test-only. It has no :run alias and defines no entry point to
-      # execute. -X:test:scala-classes (not plain -X:test) additionally
-      # puts target/scala-3/classes and the Scala standard library on
-      # the classpath, for compilation_wiring_test.clj's real interop.
+      # execute. -Scp prepends the sbt-exported classpath above onto
+      # whatever :test alone would compute (test.check, test-runner,
+      # this module's own test/main/clojure sources) -- so this module's
+      # compiled Scala classes are visible to compilation_wiring_test.clj
+      # without needing deps.edn to know or guess where sbt put them.
       - name: Run Clojure unit tests
         if: ${{ inputs.skip_tests != true }}
         working-directory: modules/postgres-bridge
-        run: clojure -X:test:scala-classes
+        run: |
+          BASE_CP=$(clojure -Spath -A:test)
+          clojure -Scp "$(cat /tmp/postgres-bridge.classpath):${BASE_CP}" -X:test
