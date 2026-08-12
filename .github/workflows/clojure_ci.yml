@@ -120,3 +120,13 @@ jobs:
         run: |
           BASE_CP=$(clojure -Spath -A:test)
           clojure -Scp "$(cat /tmp/postgres-bridge.classpath):${BASE_CP}" -X:test
+
+      # Upload Clojure crash dumps and runtime classpath on test failure
+      - name: Upload Clojure test crash report on failure
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clojure-test-failure-report
+          path: |
+            /tmp/clojure-*.edn
+            /tmp/postgres-bridge.classpath
