@@ -19,30 +19,29 @@
   ;; compilation-wiring-test.clj; mecrisp-instr-test.clj's header
   ;; describes the same need but still uses a transcribed model).
   ;;
-  ;; Run `sbt postgresBridge/compile` first, then
-  ;; `clojure -X:test:scala-classes` from this directory.
+  ;; LOCAL DEV CONVENIENCE ONLY -- CI does NOT use this alias. The path
+  ;; below (target/scala-3/classes) was a guess based on sbt's default
+  ;; scalaVersion-based crossTarget naming, and it was wrong: CI hit
+  ;; ClassNotFoundException with it. clojure_ci.yml now asks sbt
+  ;; directly for postgresBridge's real classpath (`sbt export
+  ;; postgresBridge/Compile/fullClasspath`) instead of guessing a path
+  ;; here, which is why it doesn't reference this alias.
   ;;
-  ;; target/scala-3/classes: build.sbt pins scalaVersion to 3.8.3, and
-  ;; sbt's crossTarget for any Scala 3.x is always "scala-3" (Scala 3
-  ;; guarantees binary compatibility across all 3.x minor versions under
-  ;; one major version) -- not "scala-3.x" as a literal path, and not
-  ;; "scala-3.8". Confirm against `sbt postgresBridge/classDirectory` if
-  ;; this ever needs to change.
+  ;; If you want to use this locally: run
+  ;; `sbt postgresBridge/Compile/classDirectory` to see where your own
+  ;; sbt actually put the classes, and fix the path below to match if it
+  ;; differs -- then `sbt postgresBridge/compile` followed by
+  ;; `clojure -X:test:scala-classes`.
   ;;
-  ;; org.scala-lang/scala3-library_3: the compiled classes above use
-  ;; scala.Option/Tuple2/Vector etc., which live in the Scala standard
-  ;; library, not in this project's own target/ directory -- without it,
-  ;; loading io.siunertaq.postgres.MecrispCompiler fails with
-  ;; NoClassDefFoundError before any test body even runs. Pinned to the
-  ;; same version as ThisBuild / scalaVersion in build.sbt so the
-  ;; standard library on this classpath always matches what
-  ;; postgresBridge was actually compiled against.
-  ;;
-  ;; MecrispCompiler/MecrispWordDef/MecrispInstr/BytecodeRow/ClassFileHash
-  ;; depend on nothing beyond the Scala standard library, so this is
-  ;; sufficient for compilation-wiring-test.clj. ClassASTBridge.scala and
-  ;; ClickHouseSync.scala additionally need cats-effect/circe/pekko on
-  ;; the classpath, which this alias does not attempt to provide yet.
+  ;; org.scala-lang/scala3-library_3: MecrispCompiler/MecrispWordDef/
+  ;; MecrispInstr/BytecodeRow/ClassFileHash use scala.Option/Tuple2/
+  ;; Vector etc., which live here, not in target/. Pinned to match
+  ;; ThisBuild / scalaVersion in build.sbt. This part isn't a guess.
+  ;; ClassASTBridge.scala and ClickHouseSync.scala additionally need
+  ;; cats-effect/circe/pekko/ASM on the classpath, which this alias
+  ;; does not attempt to provide -- another reason CI uses sbt's own
+  ;; fullClasspath instead of trying to hand-enumerate every dependency
+  ;; here.
   :scala-classes
   {:extra-paths ["target/scala-3/classes"]
    :extra-deps {org.scala-lang/scala3-library_3 {:mvn/version "3.8.3"}}}}}
