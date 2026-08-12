@@ -5,8 +5,6 @@ import io.circe.Json
 import io.circe.syntax.*
 import org.objectweb.asm.{ClassReader, ClassVisitor, MethodVisitor, Opcodes}
 
-import java.security.MessageDigest
-
 // ─── ClassASTBridge — .class bytecode -> JSONB StackInstr ────────────────────
 //
 //  StackInstr is the shared intermediate representation across Dhall, Scala,
