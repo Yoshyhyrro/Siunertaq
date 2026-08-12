@@ -80,11 +80,23 @@ jobs:
         with:
           cli: 'latest'
 
+      # sbt setup + module compile: compilation_wiring_test.clj does real
+      # JVM interop into io.siunertaq.postgres.MecrispCompiler (not a
+      # transcribed model, unlike mecrisp_instr_test.clj), which needs
+      # this module's actual compiled classes on the classpath -- see
+      # deps.edn's :scala-classes alias for why.
+      - name: Setup sbt
+        uses: sbt/setup-sbt@v1
+
+      - name: Compile postgres-bridge (Scala)
+        run: sbt postgresBridge/compile
+
       # No Dhall CLI and no -main here: this module is currently
-      # test-only (MecrispInstr.stackDelta model-based property tests
-      # cross-checked against each constructor's own doc comment). It
-      # has no :run alias and defines no entry point to execute.
+      # test-only. It has no :run alias and defines no entry point to
+      # execute. -X:test:scala-classes (not plain -X:test) additionally
+      # puts target/scala-3/classes and the Scala standard library on
+      # the classpath, for compilation_wiring_test.clj's real interop.
       - name: Run Clojure unit tests
         if: ${{ inputs.skip_tests != true }}
         working-directory: modules/postgres-bridge
-        run: clojure -X:test
+        run: clojure -X:test:scala-classes
