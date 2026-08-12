@@ -232,18 +232,21 @@ object ClassASTBridge:
     targetMethod:     String         = "execute",
     targetDescriptor: Option[String] = None,
     allowStubs:       Boolean        = false
-  ): IO[CompilationResult] =
+    ): IO[CompilationResult] =
     scanMethod(classBytes, targetMethod, targetDescriptor).flatMap { case (className, descriptor, opcodes) =>
-      val word = MecrispCompiler.compile(className, targetMethod, descriptor, opcodes)
-      if word.hasDeadCode && !allowStubs then
-        IO.raiseError(IncompleteTranslationException(className, targetMethod))
-      else
-        IO.pure {
-          val digest = MessageDigest.getInstance("MD5").digest(classBytes)
-          val hash   = digest.map(b => f"${b & 0xff}%02x").mkString
-          CompilationResult(words = Vector(word), rows = Vector.empty, fileHash = hash)
-        }
-    }
+    val word = MecrispCompiler.compile(className, targetMethod, descriptor, opcodes)
+    if word.hasDeadCode && !allowStubs then
+      IO.raiseError(IncompleteTranslationException(className, targetMethod))
+    else
+      IO.pure {
+        val hash = ClassFileHash.fromMd5(classBytes).value   // was: inline MessageDigest call
+        CompilationResult(
+          words    = Vector(word),
+          rows     = MecrispCompiler.toRows(word),            // was: Vector.empty
+          fileHash = hash
+        )
+      }
+  }
 
   // ── .class file path -> ForthRegistrar.registerStep() ───────────────────
   def registerFromClassFile(
