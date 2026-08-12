@@ -15,10 +15,34 @@
                 {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
    :exec-fn cognitect.test-runner.api/test}
 
-  ;; mecrisp-instr-test's real-interop variant (see that file's header)
-  ;; needs io.siunertaq.postgres.MecrispInstr's *compiled* classes on
-  ;; the classpath. Point this at wherever this module's Scala build
-  ;; emits them (e.g. a sbt `Compile / classDirectory`, or a published
-  ;; jar) -- adjust the path below to match the real build output.
+  ;; Real JVM interop into this module's compiled Scala classes (used by
+  ;; compilation-wiring-test.clj; mecrisp-instr-test.clj's header
+  ;; describes the same need but still uses a transcribed model).
+  ;;
+  ;; Run `sbt postgresBridge/compile` first, then
+  ;; `clojure -X:test:scala-classes` from this directory.
+  ;;
+  ;; target/scala-3/classes: build.sbt pins scalaVersion to 3.8.3, and
+  ;; sbt's crossTarget for any Scala 3.x is always "scala-3" (Scala 3
+  ;; guarantees binary compatibility across all 3.x minor versions under
+  ;; one major version) -- not "scala-3.x" as a literal path, and not
+  ;; "scala-3.8". Confirm against `sbt postgresBridge/classDirectory` if
+  ;; this ever needs to change.
+  ;;
+  ;; org.scala-lang/scala3-library_3: the compiled classes above use
+  ;; scala.Option/Tuple2/Vector etc., which live in the Scala standard
+  ;; library, not in this project's own target/ directory -- without it,
+  ;; loading io.siunertaq.postgres.MecrispCompiler fails with
+  ;; NoClassDefFoundError before any test body even runs. Pinned to the
+  ;; same version as ThisBuild / scalaVersion in build.sbt so the
+  ;; standard library on this classpath always matches what
+  ;; postgresBridge was actually compiled against.
+  ;;
+  ;; MecrispCompiler/MecrispWordDef/MecrispInstr/BytecodeRow/ClassFileHash
+  ;; depend on nothing beyond the Scala standard library, so this is
+  ;; sufficient for compilation-wiring-test.clj. ClassASTBridge.scala and
+  ;; ClickHouseSync.scala additionally need cats-effect/circe/pekko on
+  ;; the classpath, which this alias does not attempt to provide yet.
   :scala-classes
-  {:extra-paths ["target/scala-3.x/classes"]}}}
+  {:extra-paths ["target/scala-3/classes"]
+   :extra-deps {org.scala-lang/scala3-library_3 {:mvn/version "3.8.3"}}}}}
