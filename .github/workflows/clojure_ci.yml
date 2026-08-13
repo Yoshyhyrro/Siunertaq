@@ -91,16 +91,19 @@ jobs:
       # (the real one turned out to be target/scala-3.8.3/classes, not
       # even close). #2 switched to `sbt export ...fullClasspath` but
       # captured supershell's ANSI status-line escape codes instead of
-      # the classpath (a 4-byte file). #3 (this version) disables
-      # supershell and merges the two separate `sbt` invocations into
-      # one session -- but the resulting captured file was still 0
-      # bytes, with no visible clue why. Rather than guess a #4 cause,
-      # this version captures sbt's complete raw stdout+stderr and its
-      # real exit code (not just the tail/sed pipeline's exit code,
-      # which would hide an sbt-side failure) to
-      # /tmp/sbt-export-raw.txt, uploaded on failure below -- so the
-      # next run either works, or gives an actual root cause instead of
-      # another blind guess.
+      # the classpath (a 4-byte file). #3 disabled supershell and
+      # merged the two sbt invocations into one session, but the
+      # captured file was still empty -- turned out `-Dsbt.supershell
+      # =false` doesn't fully silence sbt: the raw dump this produced
+      # showed the real classpath printed correctly, immediately
+      # followed by one more line containing only a stray ANSI remnant
+      # ("[0J"), and `tail -n 1` was reliably grabbing that trailing
+      # line instead of the classpath above it. #4 (this version) picks
+      # the longest line instead of the last one -- the classpath,
+      # being dozens of colon-separated jar paths, is always far longer
+      # than any log or escape-remnant line, so this doesn't depend on
+      # sbt's exact trailing output shape being guessed correctly
+      # either.
       - name: Setup sbt
         uses: sbt/setup-sbt@v1
 
@@ -115,7 +118,15 @@ jobs:
           echo "Raw sbt output (last 40 lines of /tmp/sbt-export-raw.txt):"
           tail -n 40 /tmp/sbt-export-raw.txt
 
-          tail -n 1 /tmp/sbt-export-raw.txt \
+          # Confirmed from an actual raw dump: even with supershell
+          # disabled, sbt still emits one stray ANSI-remnant line
+          # ("[0J") *after* the classpath line, so `tail -n 1` was
+          # reliably grabbing that instead of the classpath. The
+          # classpath itself -- every jar on it, colon-separated -- is
+          # always dramatically longer than any log or escape-remnant
+          # line, so pick the longest line instead of the last one.
+          awk '{ if (length($0) > length(longest)) longest = $0 }
+               END { print longest }' /tmp/sbt-export-raw.txt \
             | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' \
             > /tmp/postgres-bridge.classpath
 
