@@ -87,37 +87,46 @@ jobs:
       # depend on (Scala standard library, ASM, cats-effect, etc.) -- on
       # the classpath.
       #
-      # Earlier version #1 guessed the path (target/scala-3/classes) --
-      # wrong (ClassNotFoundException). Version #2 switched to
-      # `sbt export ...fullClasspath`, but sbt's supershell writes ANSI
-      # status-line escape codes straight to stdout regardless of
-      # --error's log-level setting, so the piped output captured a
-      # terminal control sequence instead of the classpath (confirmed:
-      # the captured file was 4 bytes, "\x1b[0J" -- ClassNotFoundException
-      # again, same symptom, different cause). -Dsbt.supershell=false
-      # turns that off at the source; the sed strips any escape codes
-      # that still make it through as a second line of defense; the
-      # final check fails the step immediately with a clear message
-      # instead of leaving another cryptic ClassNotFoundException for
-      # the Clojure step to surface two steps later.
+      # History: #1 guessed the path (target/scala-3/classes) -- wrong
+      # (the real one turned out to be target/scala-3.8.3/classes, not
+      # even close). #2 switched to `sbt export ...fullClasspath` but
+      # captured supershell's ANSI status-line escape codes instead of
+      # the classpath (a 4-byte file). #3 (this version) disables
+      # supershell and merges the two separate `sbt` invocations into
+      # one session -- but the resulting captured file was still 0
+      # bytes, with no visible clue why. Rather than guess a #4 cause,
+      # this version captures sbt's complete raw stdout+stderr and its
+      # real exit code (not just the tail/sed pipeline's exit code,
+      # which would hide an sbt-side failure) to
+      # /tmp/sbt-export-raw.txt, uploaded on failure below -- so the
+      # next run either works, or gives an actual root cause instead of
+      # another blind guess.
       - name: Setup sbt
         uses: sbt/setup-sbt@v1
 
       - name: Compile postgres-bridge and export its classpath (Scala)
         run: |
-          sbt postgresBridge/compile
           sbt -Dsbt.supershell=false --error \
-            'export postgresBridge/Compile/fullClasspath' \
-            | tail -n 1 \
+            'postgresBridge/compile; export postgresBridge/Compile/fullClasspath' \
+            > /tmp/sbt-export-raw.txt 2>&1
+          SBT_EXIT=$?
+
+          echo "sbt exit code: ${SBT_EXIT}"
+          echo "Raw sbt output (last 40 lines of /tmp/sbt-export-raw.txt):"
+          tail -n 40 /tmp/sbt-export-raw.txt
+
+          tail -n 1 /tmp/sbt-export-raw.txt \
             | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' \
             > /tmp/postgres-bridge.classpath
+
           echo "Exported classpath length: $(wc -c < /tmp/postgres-bridge.classpath) bytes"
           echo "First 300 chars:"
           head -c 300 /tmp/postgres-bridge.classpath
           echo
-          if [ ! -s /tmp/postgres-bridge.classpath ] || \
+
+          if [ "${SBT_EXIT}" -ne 0 ] || [ ! -s /tmp/postgres-bridge.classpath ] || \
              ! grep -q "postgres-bridge" /tmp/postgres-bridge.classpath; then
-            echo "::error::Exported classpath is empty or missing postgres-bridge's own classes -- see the raw output above. sbt's export command or supershell setting may need another look."
+            echo "::error::sbt export did not produce a usable classpath (sbt exit ${SBT_EXIT}) -- see /tmp/sbt-export-raw.txt in the uploaded artifact for the full, unfiltered output"
             exit 1
           fi
 
@@ -144,3 +153,4 @@ jobs:
           path: |
             /tmp/clojure-*.edn
             /tmp/postgres-bridge.classpath
+            /tmp/sbt-export-raw.txt
