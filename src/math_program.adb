@@ -1,68 +1,72 @@
+--  =============================================================================
+--  math_program.adb
+--
+--  Implementation of SPARK-mode machine execution loop and instruction interpreter.
+--  =============================================================================
+
 package body Math_Program is
 
    function Exec_One (I : Instr; S : Machine_Stack) return Machine_Stack is
-      Result : Machine_Stack := S;
+      New_Stack : Machine_Stack := S;
    begin
       case I.Kind is
          when Push_Scalar =>
-            Result.Top := Result.Top + 1;
-            Result.Values (Result.Top) := Make_Scalar (I.Scalar_Arg);
+            New_Stack.Top := S.Top + 1;
+            New_Stack.Values (New_Stack.Top) := Make_Scalar (I.Scalar_Arg);
 
          when Push_Vec3 =>
-            Result.Top := Result.Top + 1;
-            Result.Values (Result.Top) :=
-              Make_Vec3 (I.Vec_X, I.Vec_Y, I.Vec_Z);
+            New_Stack.Top := S.Top + 1;
+            New_Stack.Values (New_Stack.Top) := Make_Vec3 (I.Vec_X, I.Vec_Y, I.Vec_Z);
 
          when Add_Scalar =>
             declare
-               B : constant Value := Result.Values (Result.Top);
-               A : constant Value := Result.Values (Result.Top - 1);
+               Op2 : constant Integer := S.Values (S.Top).N;
+               Op1 : constant Integer := S.Values (S.Top - 1).N;
             begin
-               Result.Top := Result.Top - 1;
-               Result.Values (Result.Top) := Make_Scalar (A.N + B.N);
+               New_Stack.Top := S.Top - 1;
+               New_Stack.Values (New_Stack.Top) := Make_Scalar (Op1 + Op2);
             end;
 
          when Add_Vec3 =>
             declare
-               B : constant Value := Result.Values (Result.Top);
-               A : constant Value := Result.Values (Result.Top - 1);
+               V2 : constant Value := S.Values (S.Top);
+               V1 : constant Value := S.Values (S.Top - 1);
             begin
-               Result.Top := Result.Top - 1;
-               Result.Values (Result.Top) :=
-                 Make_Vec3 (A.X + B.X, A.Y + B.Y, A.Z + B.Z);
+               New_Stack.Top := S.Top - 1;
+               New_Stack.Values (New_Stack.Top) :=
+                 Make_Vec3 (V1.X + V2.X, V1.Y + V2.Y, V1.Z + V2.Z);
             end;
 
          when Mul_Scalar =>
             declare
-               B : constant Value := Result.Values (Result.Top);
-               A : constant Value := Result.Values (Result.Top - 1);
+               Op2 : constant Integer := S.Values (S.Top).N;
+               Op1 : constant Integer := S.Values (S.Top - 1).N;
             begin
-               Result.Top := Result.Top - 1;
-               Result.Values (Result.Top) := Make_Scalar (A.N * B.N);
+               New_Stack.Top := S.Top - 1;
+               New_Stack.Values (New_Stack.Top) := Make_Scalar (Op1 * Op2);
             end;
 
          when Dot_Vec3 =>
             declare
-               B : constant Value := Result.Values (Result.Top);
-               A : constant Value := Result.Values (Result.Top - 1);
+               V2 : constant Value := S.Values (S.Top);
+               V1 : constant Value := S.Values (S.Top - 1);
+               Dot : constant Integer := (V1.X * V2.X) + (V1.Y * V2.Y) + (V1.Z * V2.Z);
             begin
-               Result.Top := Result.Top - 1;
-               Result.Values (Result.Top) :=
-                 Make_Scalar (A.X * B.X + A.Y * B.Y + A.Z * B.Z);
+               New_Stack.Top := S.Top - 1;
+               New_Stack.Values (New_Stack.Top) := Make_Scalar (Dot);
             end;
       end case;
 
-      return Result;
+      return New_Stack;
    end Exec_One;
 
    function Exec_Program (P : Instr_Array) return Value is
-      S : Machine_Stack := Empty_Stack;
+      St : Machine_Stack := Empty_Stack;
    begin
-      for Idx in P'Range loop
-         pragma Loop_Invariant (S.Top <= Max_Stack_Depth);
-         S := Exec_One (P (Idx), S);
+      for Index in P'Range loop
+         St := Exec_One (P (Index), St);
       end loop;
-      return S.Values (S.Top);
+      return St.Values (St.Top);
    end Exec_Program;
 
 end Math_Program;

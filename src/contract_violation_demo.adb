@@ -10,9 +10,9 @@ procedure Contract_Violation_Demo is
    --  :op "LTE"}} counterexample: a shape Exec_One's precondition is
    --  specifically designed to rule out.
    Bad_Program : constant Instr_Array :=
-     (1 => (Kind => Push_Scalar, Scalar_Arg => 5),
+     [1 => (Kind => Push_Scalar, Scalar_Arg => 5),
       2 => (Kind => Push_Vec3, Vec_X => 1, Vec_Y => 2, Vec_Z => 3),
-      3 => (Kind => Add_Scalar));
+      3 => (Kind => Add_Scalar)];
 
    Result : Value;
 begin
