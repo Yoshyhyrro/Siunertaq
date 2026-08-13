@@ -1,0 +1,52 @@
+;; modules/dhall-bridge/deps.edn
+{:paths ["src/main/clojure"]
+ :mvn/repos {"clojars" {:url "https://repo.clojars.org/"}}
+ :deps {cheshire/cheshire {:mvn/version "5.11.0"}}
+
+ :aliases
+ {:run
+  {:main-opts ["-m" "siunertaq.batch-runner"]}
+
+  ;; Runs the existing clojure.test namespaces
+  ;; (siunertaq.batch-runner-test, siunertaq.opengl-morton-test, etc.)
+  ;; via cognitect-labs/test-runner, which auto-discovers *_test.clj files
+  ;; under :extra-paths. There is no siunertaq/test_runner.clj in this repo,
+  ;; so do NOT invoke this with `-M:test -m siunertaq.test-runner` --
+  ;; that namespace does not exist. Invoke with:
+  ;;   clojure -X:test
+  ;; NOTE: org.clojure/test.generative.junit does not exist as a published
+  ;; Maven artifact -- JUnit support ships inside test.generative itself,
+  ;; not as a separate jar. Do not re-add it.
+  :test
+  {:extra-paths ["test/main/clojure"]
+   :extra-deps {org.clojure/test.check {:mvn/version "1.1.0"}
+                org.clojure/test.generative {:mvn/version "0.5.2"}
+                io.github.cognitect-labs/test-runner
+                {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+   :exec-fn cognitect.test-runner.api/test}
+
+  ;; LWJGL 3 (OpenGL + GLFW).
+  ;; A single lib symbol can only map to one Maven coordinate, so the same
+  ;; artifact cannot carry two different :classifier values in one alias.
+  ;; Use the shared :render alias for the platform-independent jars, plus
+  ;; exactly one platform-specific alias (:render-windows / :render-linux /
+  ;; :render-macos) selected at invocation time, e.g. `clj -M:render:render-linux`.
+  :render
+  {:extra-deps {org.lwjgl/lwjgl {:mvn/version "3.4.2"}
+                org.lwjgl/lwjgl-glfw {:mvn/version "3.4.2"}
+                org.lwjgl/lwjgl-opengl {:mvn/version "3.4.2"}}}
+
+  :render-windows
+  {:extra-deps {org.lwjgl/lwjgl {:mvn/version "3.4.2" :classifier "natives-windows"}
+                org.lwjgl/lwjgl-glfw {:mvn/version "3.4.2" :classifier "natives-windows"}
+                org.lwjgl/lwjgl-opengl {:mvn/version "3.4.2" :classifier "natives-windows"}}}
+
+  :render-linux
+  {:extra-deps {org.lwjgl/lwjgl {:mvn/version "3.4.2" :classifier "natives-linux"}
+                org.lwjgl/lwjgl-glfw {:mvn/version "3.4.2" :classifier "natives-linux"}
+                org.lwjgl/lwjgl-opengl {:mvn/version "3.4.2" :classifier "natives-linux"}}}
+
+  :render-macos
+  {:extra-deps {org.lwjgl/lwjgl {:mvn/version "3.4.2" :classifier "natives-macos"}
+                org.lwjgl/lwjgl-glfw {:mvn/version "3.4.2" :classifier "natives-macos"}
+                org.lwjgl/lwjgl-opengl {:mvn/version "3.4.2" :classifier "natives-macos"}}}}}

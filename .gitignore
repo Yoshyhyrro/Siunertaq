@@ -6,13 +6,13 @@
 /.bsp/
 /.bloop/
 
-# Clojure
+# Clojure / Leiningen
 .clj-kondo/
+modules/dhall-bridge/.cpcache/
+modules/postgres-bridge/.cpcache/
+modules/postgres-bridge/.lsp/
 .clj
 .edn
-.github\workflows\clojure_ci.yml
-
-
 
 # Coursier / caches
 /.coursier/

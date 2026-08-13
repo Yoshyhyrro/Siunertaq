@@ -4,16 +4,16 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - example/feature/alire_pm_test
+      - example/feature/clojure_Alexander–Hodge
     paths:
       - build.sbt
       - modules/core/**
       - modules/z3-bridge/**
-      - modules/dhall-bridge/**          # CondEvaluatorSpec がここに入る
-      - modules/batch-bridge/**          # PerlBridge / RubyBridge ソース変更を捕捉
+      - modules/dhall-bridge/**          # Captures CondEvaluatorSpec changes
+      - modules/batch-bridge/**          # Captures PerlBridge and RubyBridge source changes
       - modules/yices-bridge/**
-      - examples/**               # examples の変更もテストに影響する可能性があるため
-      - modules/postgres-bridge/**  # postgres-bridge の変更もテストに影響する可能性があるため
+      - examples/**                      # Example updates may affect downstream tests
+      - modules/postgres-bridge/**       # Postgres bridge updates may affect test suite execution
       - .github/workflows/yices_test_ci.yml
   pull_request:
     paths:
@@ -21,10 +21,10 @@ on:
       - modules/core/**
       - modules/z3-bridge/**
       - modules/dhall-bridge/**
-      - modules/batch-bridge/**          # PerlBridge / RubyBridge ソース変更を捕捉
+      - modules/batch-bridge/**          # Captures PerlBridge and RubyBridge source changes
       - modules/yices-bridge/**
-      - examples/**                      # examples の変更もテストに影響する可能性があるため
-      - modules/postgres-bridge/**       # postgres-bridge の変更もテストに影響する可能性があるため
+      - examples/**                      # Example updates may affect downstream tests
+      - modules/postgres-bridge/**       # Postgres bridge updates may affect test suite execution
       - .github/workflows/yices_test_ci.yml
 
 permissions:
@@ -40,8 +40,8 @@ jobs:
     env:
       RUN_YICES_SMOKE: "1"
       YICES_ARTIFACT_DIR: modules/yices-bridge/target/yices-artifacts
-      RUN_PERL_CROSSCHECK: "1"                       # PerlBridgeSpec + .pl スクリプト生成を有効化
-      PERL_SCRIPT_SAVE_DIR: ci-out/perl-scripts      # 生成 .pl を artifact として保持
+      RUN_PERL_CROSSCHECK: "1"                       # Enable PerlBridgeSpec and .pl script generation
+      PERL_SCRIPT_SAVE_DIR: ci-out/perl-scripts      # Persist generated .pl scripts as build artifacts
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -71,7 +71,7 @@ jobs:
           set -euxo pipefail
           yices-smt2 --version
 
-      # CondEvaluator は純粋関数なので Yices 不要・先に単独で実行
+      # CondEvaluator is a pure Scala class, so its unit tests can be run without Yices installed.  This is useful for testing the CI setup itself.
       - name: Run CondEvaluator unit tests (pure; no Yices required)
         shell: bash
         run: |
@@ -83,7 +83,7 @@ jobs:
         run: |
           set -euxo pipefail
           sbt \
-            "core/testOnly io.siunertaq.threshold.*"           \
+            "core/testOnly io.siunertaq.threshold.* io.siunertaq.expr.NamespaceCanonHashedSpec" \
             "z3Bridge/compile"                                  \
             "yicesBridge/compile"                               \
             "batchBridge/compile"                               \
@@ -92,11 +92,11 @@ jobs:
             "petersenMzv/compile"                              \
             "yicesBridge/testOnly io.siunertaq.yicesbridge.*"
 
-      # ─── 共通ライブラリ成果物 ──────────────────────────────────────────────
-      # compile 済みクラスから JAR を生成する。incremental なので追加コストは小さい。
-      # 対象: core (Program / Instr / Value の IR 定義)
-      #        batch-bridge (PerlBridge / StackMachineTasklet / ScriptBackend)
-      #        postgres-bridge (ClickHouse スキーマ + CDC パイプライン)
+      # --- Common Library Artifacts -----------------------------------------
+      # Package compiled classes into JARs. Incremental builds minimize overhead.
+      # Target modules: core (Program / Instr / Value IR definitions)
+      #                batch-bridge (PerlBridge / StackMachineTasklet / ScriptBackend)
+      #                postgres-bridge (ClickHouse schema + CDC pipeline)
       - name: Package common library JARs
         if: success()
         shell: bash
@@ -112,9 +112,9 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          mkdir -p ci-out/schema ci-out/perl-scripts   # perl-scripts は find 前に必ず作る
+          mkdir -p ci-out/schema ci-out/perl-scripts   # Ensure perl-scripts directory exists prior to search
 
-          # ── JAR: モジュール別サブディレクトリに収める (同名上書き防止) ───────
+          # --- JAR: Store in module-specific subdirectories to prevent overwrite collisions ---
           for mod in core batch-bridge postgres-bridge; do
             src="modules/$mod/target"
             dest="ci-out/jars/$mod"
@@ -125,9 +125,9 @@ jobs:
               -print0 | xargs -0 -I{} cp {} "$dest/"
           done
 
-          # ── .class: package パスを保持して収集 ───────────────────────────
-          # target/scala-3.x.x/classes/ 以下は depth 4+ → maxdepth なしで探索
-          # ${f##*/classes/} で classes/ 以降のパスだけ取り出してコピー
+          # --- .class: Collect while preserving package hierarchy ---
+          # Traverse subdirectories under target/scala-3.x.x/classes/ without maxdepth restriction
+          # Extract relative path starting from classes/ and copy to destination
           for mod in core batch-bridge; do
             find "modules/$mod/target" -name "*.class" -path "*/classes/io/*" \
               -print0 | while IFS= read -r -d '' f; do
@@ -138,26 +138,26 @@ jobs:
               done
           done
 
-          # ── .pl: PERL_SCRIPT_SAVE_DIR に保存済みのスクリプト ─────────────
-          # PerlBridge.executePerl が RUN_PERL_CROSSCHECK=1 の実行時に書き出す
+          # --- .pl: Scripts persisted in PERL_SCRIPT_SAVE_DIR ---
+          # Emitted by PerlBridge.executePerl when RUN_PERL_CROSSCHECK=1 is set
           pl_dir="${PERL_SCRIPT_SAVE_DIR:-ci-out/perl-scripts}"
           pl_count=$(find "$pl_dir" -name "*.pl" 2>/dev/null | wc -l)
           echo ".pl scripts collected: $pl_count"
 
-          # ── .pm: batch-bridge リソース内の Perl モジュール (あれば) ──────
+          # --- .pm: Perl modules located in batch-bridge resources (if present) ---
           pm_src="modules/batch-bridge/src/main/resources"
           if find "$pm_src" \( -name "*.pm" -o -name "*.pl" \) -quit 2>/dev/null \
              | grep -q .; then
             find "$pm_src" \( -name "*.pm" -o -name "*.pl" \) \
               -print0 | while IFS= read -r -d '' f; do
-                rel="${f#$pm_src/}"          # perl/Siunertaq/StackMachine.pm
+                rel="${f#$pm_src/}"          # e.g., perl/Siunertaq/StackMachine.pm
                 dest="ci-out/perl/$rel"
                 mkdir -p "$(dirname "$dest")"
                 cp "$f" "$dest"
               done
           fi
 
-          # ── ClickHouse schema SQL ──────────────────────────────────────────
+          # --- ClickHouse schema SQL --------------------------------------------
           find . -path "*/resources/clickhouse_schema.sql" \
             -print0 | xargs -0 -I{} cp {} ci-out/schema/
 

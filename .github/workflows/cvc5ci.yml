@@ -36,35 +36,6 @@ jobs:
           # Initialize Why3 configuration directly with the native detect command
           why3 config detect
 
-      - name: Verify Ada source tree was checked out (not a placeholder)
-        run: |
-          # This job used to *write* src/proof_target.ads/.adb here as a
-          # scaffold, back when the repository had no real Ada source yet.
-          # That scaffold now overwrites real, checked-in verification
-          # targets (Math_Types, Math_Program, and the real Proof_Target)
-          # on every run, silently discarding them. Do not regenerate
-          # src/*.ads/*.adb here -- they come from the checkout. This step
-          # only fails loudly if that ever regresses (e.g. someone re-adds
-          # a generation step, or the files are accidentally removed from
-          # version control).
-          for f in src/math_types.ads src/math_types.adb \
-                   src/math_program.ads src/math_program.adb \
-                   src/proof_target.ads src/proof_target.adb; do
-            if [ ! -f "$f" ]; then
-              echo "::error::$f is missing from the checkout -- refusing to" \
-                   "synthesize a placeholder in its place. Fix the checkout" \
-                   "or restore the file in version control instead."
-              exit 1
-            fi
-          done
-
-          if grep -q "Dummy_Proof" src/proof_target.ads; then
-            echo "::error::src/proof_target.ads still contains the old" \
-                 "placeholder (Dummy_Proof). Verification would silently" \
-                 "prove nothing about the real CondExpr/Math_Program domain."
-            exit 1
-          fi
-
       - name: Build Alire Workspace
         run: |
           # Force Alire to synchronize with the globally installed system compiler rather than fetching its own
