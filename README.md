@@ -398,15 +398,17 @@ examples/
 ## Release Notes
 
 See the [GitHub Releases](../../releases) page for the full changelog.
-The most recent release is **[v0.1.1.alpha.1](../../releases/tag/v0.1.1.alpha.1)** —
-shared StackInstr JSON, `Siunertaq::StackMachine.pm`, and full `PerlBridgeSpec` green (32/32).
+The most recent release is **[v0.1.1.alpha.2](../../releases/tag/v0.1.1.alpha.2)** —
+`postgres-bridge`'s `.class` → Mecrisp Forth → ClickHouse pipeline wired end-to-end, SPARK's first proof
+output about this project's own domain, and `dhall-bridge`'s Clojure/Alexander–Hodge work.
 
 ## Current status
 
 - Arithmetic IR and threshold AST implemented; all core tests passing.
 - Yices and Z3 verification lanes separated and independently runnable.
 - GitHub Actions CI validates the Yices path on `ubuntu-latest` with the real solver binary.
-- Codebase prepared for SPARK/Ada proof packages: `lower` and S-expression round-trips already have ScalaTest specs that serve as ground-truth witnesses.
+- SPARK/Ada proof pipeline produced its first proof output about this project's own domain (previously it exercised a disconnected placeholder): `Math_Types`/`Math_Program`/`Proof_Target` implement the same 6-instruction stack machine as the Scala `sealed trait Value` / `ProgramEval.exec` pair, and CVC5 proves `Required_Depth`/`Depth_Delta` always terminate and that `Exec_One`'s stack-index access can never go out of bounds for any input satisfying its precondition — proved impossible, not just untested. `Exec_Program`'s general well-typedness precondition is not yet proved (see Future work).
+- `dhall-bridge` gained a Clojure implementation alongside its Dhall/Scala side (`morton.clj`, `batch_runner.clj`, `flock_diagnostics.clj`): Morton (Z-order) encoding, JCL `COND`-statement evaluation via a `dhall-to-json` subprocess, and flock-size diagnostics, with an AVX2 SIMD mock exercised by `batch_runner_test.clj`.
 - `batch-bridge` compiles cleanly under Scala 3.8.3 with `-language:strictEquality`: `BatchJob.dhall` → `BatchJobDef` → Spring Batch step execution driven by the BSD Quiver stack machine, with JCL-inspired `CondExpr` execution control and Pekko `OneForOneStrategy` fault isolation.
 - `PerlBridge` provides opt-in Scala/Perl differential testing (`RUN_PERL_CROSSCHECK=1`). Generated `.pl` scripts delegate all stack-machine logic to `Siunertaq::StackMachine.pm` via `JSON::PP` — the same `{"PushScalar":{"n":5}}` format emitted by `ClassASTBridge` and stored in the PostgreSQL `instructions` column. `PerlBridgeSpec` runs 32 tests green in CI, including a full subprocess integration suite.
 - `Program.toJson` in `core` is the canonical StackInstr JSON format shared by `.class` analysis (`ClassASTBridge`), PostgreSQL JSONB (`ForthRegistrar`), and Perl execution (`Siunertaq::StackMachine->execute_json`).
@@ -419,6 +421,7 @@ shared StackInstr JSON, `Siunertaq::StackMachine.pm`, and full `PerlBridgeSpec` 
 - `MachineConstants` separates the logarithmic `galoisHeight` (GIT semistability mask) from the linear `octadHeight` (Berkovich tree position) and grounds the tower in IEEE 754 via `machineEpsilonReal = 2⁻⁵²` and `valuationDepth = 52`.
 - `YangBaxterBanach` supplies the Satake spectral parameter bridge (`SpiralRotation → spiralToSpectralParam → PhantomCarabiner`) and the rational GL₂ R-matrix.
 - v0.1.1.alpha.1: all six active modules (`core`, `z3Bridge`, `yicesBridge`, `dhallBridge`, `batchBridge`, `petersenMzv`) compile cleanly; `PerlBridgeSpec` 32/32 green including Perl subprocess integration.
+- v0.1.1.alpha.2: `postgres-bridge`'s `rows`/`class_file_hash` wiring fixed (previously non-compiling) and its first real Scala/Clojure JVM interop test added; SPARK's first domain-specific proof output; `dhall-bridge` Clojure/Alexander–Hodge work landed. See [Release Notes](../../releases/tag/v0.1.1.alpha.2) for the full list.
 
 ## Future work
 
@@ -430,6 +433,7 @@ shared StackInstr JSON, `Siunertaq::StackMachine.pm`, and full `PerlBridgeSpec` 
 - ClickHouse: additional materialised views for per-step latency distribution and cross-language divergence tracking (cases where `MISMATCH` was logged)
 - `postgres-bridge`: wire `mzv_triple_log` PostgreSQL audit table directly into the Pekko supervision tree so every `ImaginaryPopperActor` regularization event is immutably recorded (ClickHouse CDC mirror `mzv_triple_stream` is complete; direct actor-tree wiring is pending)
 - `postgres-bridge`: give `ClassASTBridge.compileFromClassFile` an actual caller — a directory watcher, a build-time hook, or a CLI entry point. The translation → ClickHouse ingestion path is fully wired end-to-end now (see Current status), but nothing in the source tree currently invokes it, so no bytecode compilation happens outside of `compilation_wiring_test.clj`'s own test fixtures
+- SPARK/Ada: prove the real theorem `Exec_Program` currently sidesteps — *any program produced by a well-typed lowering never violates `Exec_One`'s precondition* — rather than the placeholder `P'Length > 0`; this is the Ada-side equivalent of what `Lowering.lower`'s `ExprTyping.isWellTyped` guard already does dynamically on the Scala side
 - `batchBridge` residual warnings: `ActorProtocol.scala` (`ActorRef` unused import), `JobSupervisorActor.scala` (`Terminated(_)` pattern variable), `MZVMachineBean.scala` (`unsafeRunSync`/`unsafeToFuture` → `using`), `PetersenSmtSolver.scala` (`Files.writeString` return discarded)
 
 ## Contributing
