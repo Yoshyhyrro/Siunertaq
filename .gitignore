@@ -8,6 +8,11 @@
 
 # Clojure
 .clj-kondo/
+.clj
+.edn
+.github\workflows\clojure_ci.yml
+
+
 
 # Coursier / caches
 /.coursier/
