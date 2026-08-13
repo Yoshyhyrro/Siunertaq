@@ -2,7 +2,7 @@ name: CVC5 Verification Pipeline
 
 on:
   push:
-    branches: [ "example/feature/clojure_Alexander–Hodge" ]
+    branches: [ "main" ]
   pull_request:
 
 jobs:

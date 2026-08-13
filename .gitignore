@@ -11,6 +11,8 @@
 modules/dhall-bridge/.cpcache/
 modules/postgres-bridge/.cpcache/
 modules/postgres-bridge/.lsp/
+.clj
+.edn
 
 # Coursier / caches
 /.coursier/
