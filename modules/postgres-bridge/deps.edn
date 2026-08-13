@@ -20,17 +20,19 @@
   ;; describes the same need but still uses a transcribed model).
   ;;
   ;; LOCAL DEV CONVENIENCE ONLY -- CI does NOT use this alias. The path
-  ;; below (target/scala-3/classes) was a guess based on sbt's default
-  ;; scalaVersion-based crossTarget naming, and it was wrong: CI hit
-  ;; ClassNotFoundException with it. clojure_ci.yml now asks sbt
-  ;; directly for postgresBridge's real classpath (`sbt export
-  ;; postgresBridge/Compile/fullClasspath`) instead of guessing a path
-  ;; here, which is why it doesn't reference this alias.
+  ;; below is confirmed from an actual CI compile log (not a guess this
+  ;; time): `sbt postgresBridge/compile` reported "compiling 12 Scala
+  ;; sources to .../modules/postgres-bridge/target/scala-3.8.3/classes"
+  ;; -- sbt's crossTarget apparently uses the full scalaVersion
+  ;; (3.8.3), not just the binary "3", contrary to what was assumed
+  ;; earlier. clojure_ci.yml still asks sbt directly for
+  ;; postgresBridge's real classpath rather than relying on this path,
+  ;; since it's cheap to keep doing that and removes any need to keep
+  ;; this comment in sync with future Scala/sbt version bumps.
   ;;
-  ;; If you want to use this locally: run
-  ;; `sbt postgresBridge/Compile/classDirectory` to see where your own
-  ;; sbt actually put the classes, and fix the path below to match if it
-  ;; differs -- then `sbt postgresBridge/compile` followed by
+  ;; If your local sbt output differs, run
+  ;; `sbt postgresBridge/Compile/classDirectory` to check, then
+  ;; `sbt postgresBridge/compile` followed by
   ;; `clojure -X:test:scala-classes`.
   ;;
   ;; org.scala-lang/scala3-library_3: MecrispCompiler/MecrispWordDef/
@@ -43,5 +45,5 @@
   ;; fullClasspath instead of trying to hand-enumerate every dependency
   ;; here.
   :scala-classes
-  {:extra-paths ["target/scala-3/classes"]
+  {:extra-paths ["target/scala-3.8.3/classes"]
    :extra-deps {org.scala-lang/scala3-library_3 {:mvn/version "3.8.3"}}}}}
