@@ -110,20 +110,20 @@ lazy val core = (project in file("modules/core"))
     name := "Siunertaq-core",
     scalacOptions ++= commonScalacOptions,
     libraryDependencies ++= commonDependencies ++ Seq(
-      // Apache Pekko Streams: org.apache.pekko (Scala 3 ネイティブ)
+      // Apache Pekko Streams: org.apache.pekko (Scala 3 native support)
       "org.apache.pekko" %% "pekko-stream"              % PekkoVersion,
       "org.apache.pekko" %% "pekko-actor-typed"         % PekkoVersion,
       "org.apache.pekko" %% "pekko-slf4j"               % PekkoVersion,
-      // Cats Effect: IO 効果基盤 (Dhall REPL 戻り値の効果登録)
+      // Cats Effect: IO effect (Dhall REPL → IO effect registration)
       "org.typelevel"    %% "cats-effect"                % CatsEffectVersion,
-      // fs2: Cats Effect と親和性の高いストリーム層
+      // fs2: Cats Effect IO streams (Dhall REPL → IO effect registration)
       "co.fs2"           %% "fs2-core"                   % Fs2Version,
       "co.fs2"           %% "fs2-io"                     % Fs2Version,
-      // circe: Dhall → JSON デコード
+      // circe: Dhall → JSON decoding (via dhall-to-json subprocess)
       "io.circe"         %% "circe-core"                 % CirceVersion,
       "io.circe"         %% "circe-generic"              % CirceVersion,
       "io.circe"         %% "circe-parser"               % CirceVersion,
-      // テスト
+      // testkit: Pekko Streams + Actor testkit for unit tests
       "org.apache.pekko" %% "pekko-stream-testkit"       % PekkoVersion % Test,
       "org.apache.pekko" %% "pekko-actor-testkit-typed"  % PekkoVersion % Test,
       "org.typelevel"    %% "cats-effect-testing-scalatest" % "1.5.0"   % Test,
@@ -146,7 +146,7 @@ lazy val z3Bridge = (project in file("modules/z3-bridge"))
     libraryDependencies ++= commonDependencies ++ Seq(
       // com.microsoft.z3.{Context, Solver, RealExpr, Status, ...}
       "io.github.p-org.solvers" % "z3" % Z3Version
-      // ---- 代替: ローカルビルド版 (z3 --java でビルド後 publishLocal) ----
+      // ---- this is a placeholder ----
       // "com.microsoft" % "z3" % "4.12.6" from "file:lib/com.microsoft.z3.jar"
     ),
     // Path for libz3.so + libz3java.so
@@ -189,7 +189,8 @@ lazy val dhallBridge = (project in file("modules/dhall-bridge"))
       "org.typelevel" %% "cats-effect"  % CatsEffectVersion,
       "co.fs2"        %% "fs2-io"       % Fs2Version,
       "io.circe"      %% "circe-parser" % CirceVersion
-      // dhall-to-json バイナリ: sys.env("DHALL_TO_JSON") または PATH 経由
+      // dhall-to-json binary is a separate executable, not a JVM dependency. Install via:
+      //   sudo apt install dhall-json
     )
   )
 
@@ -208,10 +209,10 @@ lazy val mlirBridge = (project in file("modules/mlir-bridge"))
     scalacOptions ++= commonScalacOptions,
     libraryDependencies ++= commonDependencies ++ Seq(
       "org.typelevel" %% "cats-effect" % CatsEffectVersion
-      // MLIR C API JNI ラッパーはプロジェクト固有のため手動追加
+      // MLIR C API JNI requires a separate JNI library (libmlir-jni.so) built from llvm-project. Install via:
       // "io.siunertaq" %% "mlir-jni" % "0.1.0"
     ),
-    // MLIR 共有ライブラリ (llvm-project ビルド成果物)
+    // MLIR common C API JNI library path (libmlir-jni.so)
     // Ubuntu: sudo apt install llvm-18  →  /usr/lib/llvm-18/lib/
     javaOptions ++= Seq(
       s"-Djava.library.path=${sys.env.getOrElse("MLIR_LIB_PATH", "") }"
@@ -219,12 +220,12 @@ lazy val mlirBridge = (project in file("modules/mlir-bridge"))
   )
 
 // ---------------------------------------------------------------------------
-// batchBridge: Spring Batch + Pekko JES2 — BSDQuiver スタックマシン駆動バッチ
+// batchBridge: Spring Batch + Pekko JES2 — BSDQuiver which is a batch job scheduler
 //
-//   Dhall で記述したジョブ定義 (BatchJob.dhall) を dhall-to-json → circe で
-//   BatchJobDef に変換し、Spring Batch Step をPekkoアクターでラップする。
-//   JCL COND 文の代数的セマンティクスを CondEvaluator で実装。
-//   OneForOneStrategy でステップ単位のABEND隔離 (JES2相当)。
+//   Dhall → BatchJobDef → Spring Batch Step → Pekko Actor
+//   BatchJobDef is a DSL for defining batch jobs as directed quivers (BSDArrow).
+//   JCL COND codes are mapped to Pekko Actor supervision strategies, e.g.
+//   OneForOneStrategy for a single step failure, or AllForOneStrategy for a multi-step failure.
 // ---------------------------------------------------------------------------
 lazy val batchBridge = (project in file("modules/batch-bridge"))
   .dependsOn(core, dhallBridge)
@@ -237,7 +238,7 @@ lazy val batchBridge = (project in file("modules/batch-bridge"))
       // Spring Batch 5: Step / Tasklet / JobRepository
       "org.springframework.batch"  % "spring-batch-core" % SpringBatchVersion,
       "org.springframework"        % "spring-jdbc"        % "6.1.14",
-      // in-memory JobRepository 用 H2
+      // in-memory JobRepository
       "com.h2database"             % "h2"                 % H2Version % Runtime
     )
   )
