@@ -1,6 +1,7 @@
 # Siunertaq
 
 ![Yices Threshold CI](https://github.com/Yoshyhyrro/Siunertaq/actions/workflows/yices_test_ci.yml/badge.svg)
+![Clojure CI](https://github.com/Yoshyhyrro/Siunertaq/actions/workflows/clojure_ci.yml/badge.svg)
 ![Release](https://github.com/Yoshyhyrro/Siunertaq/actions/workflows/release.yml/badge.svg)
 
 *ᓯᐅᓇᕐᑕᖅ — Inuktitut for "that which lies ahead; a purpose"*
@@ -13,7 +14,8 @@ The repository combines:
 - a `yices-bridge` module for Yices 2 SMT cross-checking,
 - a `dhall-bridge` module for total Dhall input evaluation via `cats-effect`,
 - a `batch-bridge` module for JCL-inspired step orchestration via Apache Pekko and Spring Batch,
-- a `petersen-mzv` module for MZV depth-3 reduction on the Petersen graph with full SMT verification, and
+- a `petersen-mzv` module for MZV depth-3 reduction on the Petersen graph with full SMT verification,
+- a `postgres-bridge` module that translates JVM bytecode to Mecrisp Forth via ASM and streams the result to a ClickHouse analytics sink, cross-checked by a Clojure test suite that includes real JVM interop, and
 - a planned `mlir-bridge` module for future MLIR integration.
 
 ## Modules
@@ -26,6 +28,7 @@ The repository combines:
 | `dhall-bridge` | Dhall → JSON → Scala batch job decoder | `BatchJobDef`, `CondEvaluator`, `DhallBatchRegistry` |
 | `batch-bridge` | JCL/JES2-style Pekko + Spring Batch orchestration | `JobSupervisorActor`, `StepExecutorActor`, `StackMachineTasklet`, `PerlBridge` |
 | `petersen-mzv` | MZV depth-3 reduction on the Petersen phase graph | `PetersenFluidMachine`, `ImaginaryPopperActor`, `MZVMachineBean` |
+| `postgres-bridge` | `.class` bytecode → Mecrisp Forth translation; ClickHouse analytics sink | `ClassASTBridge`, `MecrispCompiler`, `ClickHouseSyncActor`, `ClassFileHash` |
 | `mlir-bridge` | *(planned)* MLIR / Affine Dialect integration | — |
 
 ---
@@ -284,6 +287,8 @@ The two bridges are deliberately kept at arm's length: `z3-bridge` links against
 - `dhall-to-json` on `$PATH` for `dhall-bridge` and `batch-bridge` evaluation
 - `z3` on `$PATH` (or via `Z3_PATH`) for optional MZV SMT smoke tests (`RUN_MZV_SMT_SMOKE=1`)
 - `perl` on `$PATH` (optional) for `PerlBridge` Scala/Perl differential testing (`RUN_PERL_CROSSCHECK=1`); Ubuntu: `sudo apt install perl`, Windows: [Strawberry Perl](https://strawberryperl.com/)
+- Clojure CLI (`clojure`) on `$PATH` for `dhall-bridge` and `postgres-bridge` unit tests
+- `sbt` available if running `postgres-bridge`'s `compilation_wiring_test.clj` locally — it does real JVM interop into the compiled Scala classes, not a transcribed model, so it needs `postgres-bridge`'s actual classpath (see that module's `deps.edn`)
 
 ## Build
 
@@ -339,6 +344,35 @@ modules/
       batch/          — BatchJobDef, DhallBatchRegistry, CondEvaluator
   batch-bridge/       — Spring Batch + Pekko JES2; StackMachineTasklet, StepExecutorActor, JobSupervisorActor, PerlBridge (OS-aware Perl cross-validation)
   mlir-bridge/        — planned MLIR / Affine Dialect integration
+  postgres-bridge/
+    extension/
+      clickhouse_schema.sql          — ClickHouse DDL: bytecode_instructions, forth_words, mzv_triple_stream
+      siunertaq_forth.control, siunertaq_petersen*.sql — PostgreSQL extension packaging
+    src/main/scala/io/siunertaq/postgres/
+      ClassASTBridge.scala      — ASM-based .class bytecode scanning; fail-fast (scanMethod shared between
+                                   extractFromBytes/compileClass; Unsupported/Overloaded/MethodNotFound/
+                                   IncompleteTranslationException replace the old silent-skip/merge behaviour)
+      MecrispCompiler.scala     — opcode → MecrispInstr translation, MecrispWordDef, toRows (per-instruction
+                                   BytecodeRow, one row per opcode rather than one per method)
+      MecrispInstr.scala        — the Forth instruction ADT (61 cases) and MecrispWordDef
+      ClassFileHash.scala       — opaque 32-hex-char MD5 type. A convenience fixed-width fingerprint matching
+                                   the ClickHouse schema width, not a cryptographic property — same convention
+                                   as NamespaceCanonHashed in `core`
+      ClickHouseSync.scala      — ClickHouseSyncActor: PushCompilation protocol, batched forth_words /
+                                   bytecode_instructions ingestion
+      DeadCodeAnalyzer.scala    — static dead-code analysis over compiled Mecrisp words
+      ForthConnMachine.scala, ForthOp.scala, ForthRegistrar.scala, ForthRegistrarActor.scala
+                                — PostgreSQL Forth-function registration: a cats Ref state machine tracks
+                                  connection state, a thin Pekko actor decides when to reconnect
+      ConnState.scala, PetersenVertexBSD.scala — connection-state enum; Scala mirror of PetersenMZV.dhall
+    test/main/clojure/siunertaq/
+      schema_drift_test.clj        — diffs the ClickHouse DDL against the Scala JSON-emission source directly,
+                                      with an honestly-tracked known-hard-missing-column set rather than a
+                                      silently-passing test
+      mecrisp_instr_test.clj       — property-based cross-check of MecrispInstr.stackDelta against a
+                                      transcribed model
+      compilation_wiring_test.clj  — real JVM interop into the compiled MecrispCompiler object; regression
+                                      guard for the rows / class_file_hash wiring into ClickHouseSyncActor
 examples/
   petersen-mzv/
     src/main/scala/io/siunertaq/mzv/
@@ -353,6 +387,9 @@ examples/
   mzv_enterprise_carabiner_system.scala  — standalone demonstration
 .github/workflows/
   yices_test_ci.yml   — CI: installs Yices 2, runs threshold + solver + CondEvaluator tests
+  clojure_ci.yml      — CI: dhall-bridge + postgres-bridge Clojure test suites; for postgres-bridge, compiles
+                         the Scala classes with sbt first and exports the real classpath for real JVM interop
+                         (compilation_wiring_test.clj) rather than assuming where sbt put anything
   release.yml         — Release: tag push → full test → sbt package → GitHub Release
 ```
 
@@ -376,7 +413,7 @@ shared StackInstr JSON, `Siunertaq::StackMachine.pm`, and full `PerlBridgeSpec` 
 - `CondEvaluatorSpec` covers all six `CondOp` variants with boundary values; runs in CI without any external tools.
 - Automated release workflow publishes per-module JARs to GitHub Releases on version tag push.
 - `petersen-mzv` compiles cleanly: `PetersenFluidMachine` implements Furusho's pentagon coherence as a typed Scala 3 Cats Effect pipeline; `ImaginaryPopperActor` handles IKZ-style regularization of divergent triples ($s_1 = 1$); full SMT suite P1–P7 passes on `z3`.
-- `postgres-bridge`: ClickHouse 24.x analytics backend operational; CDC pipeline (`mzv_triple_stream`, `bytecode_instructions`, `forth_words`) ready for production ingestion.
+- `postgres-bridge`: `.class` bytecode → Mecrisp Forth translation via ASM (`ClassASTBridge`), fail-fast on unsupported opcodes, ambiguous overloads, and incomplete translations rather than the earlier silent-skip/merge behaviour. `rows` and `class_file_hash` are now correctly wired from `compileClass` through `ClickHouseSyncActor` into the `forth_words` / `bytecode_instructions` ClickHouse sinks (previously `rows` was hard-coded empty and `class_file_hash` was never emitted — both were an in-progress, uncompiling fix on this branch, not a documentation gap). `ClassASTBridge.compileClass` / `compileFromClassFile` still have no caller anywhere in the source tree wiring them into a live ingestion path — see Future Work. MD5 usage throughout (`ClassFileHash`, and `NamespaceCanonHashed` in `core`) is a convenience fixed-width fingerprint matching the ClickHouse schema's `FixedString(32)` column, proved in `hash_encoding.ads` (Ada/SPARK) to be the correct width where SHA-256 would not be — not a cryptographic property, and not something that was ever "fixed" for security reasons.
 - `carabiner/` package formalises the Golay lattice (five weight classes, self-dual route, M₂₄ 8A orbit match) and lifts it to a complex Berkovich evaluation layer via `PhantomCarabiner`.
 - `opaque type ComplexWeight` and `opaque type PhantomCarabinerRef` hide implementation details behind algebra-preserving APIs; `berryPhaseAngle` and `weightNormSq` are the only exposed gauge-invariant observables.
 - `MachineConstants` separates the logarithmic `galoisHeight` (GIT semistability mask) from the linear `octadHeight` (Berkovich tree position) and grounds the tower in IEEE 754 via `machineEpsilonReal = 2⁻⁵²` and `valuationDepth = 52`.
@@ -392,6 +429,7 @@ shared StackInstr JSON, `Siunertaq::StackMachine.pm`, and full `PerlBridgeSpec` 
 - Language bridge expansion: extend the `PerlBridge` pattern to **Portable Ruby** (mruby or CRuby `--with-static-stdlib`) as the next cross-validation target; unify `PerlBackend` and `RubyBackend` under a `ScriptBackend` trait so `toPerlScript` / `toRubyScript` share one generator
 - ClickHouse: additional materialised views for per-step latency distribution and cross-language divergence tracking (cases where `MISMATCH` was logged)
 - `postgres-bridge`: wire `mzv_triple_log` PostgreSQL audit table directly into the Pekko supervision tree so every `ImaginaryPopperActor` regularization event is immutably recorded (ClickHouse CDC mirror `mzv_triple_stream` is complete; direct actor-tree wiring is pending)
+- `postgres-bridge`: give `ClassASTBridge.compileFromClassFile` an actual caller — a directory watcher, a build-time hook, or a CLI entry point. The translation → ClickHouse ingestion path is fully wired end-to-end now (see Current status), but nothing in the source tree currently invokes it, so no bytecode compilation happens outside of `compilation_wiring_test.clj`'s own test fixtures
 - `batchBridge` residual warnings: `ActorProtocol.scala` (`ActorRef` unused import), `JobSupervisorActor.scala` (`Terminated(_)` pattern variable), `MZVMachineBean.scala` (`unsafeRunSync`/`unsafeToFuture` → `using`), `PetersenSmtSolver.scala` (`Files.writeString` return discarded)
 
 ## Contributing
