@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - example/feature/clojure_Alexander–Hodge
+      - hotfix/rows-wordBuf
     paths:
       - build.sbt
       - modules/core/**

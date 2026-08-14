@@ -2,7 +2,7 @@ name: CVC5 Verification Pipeline
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "hotfix/rows-wordBuf" ]
   pull_request:
 
 jobs:
