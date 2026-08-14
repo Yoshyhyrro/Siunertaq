@@ -1,6 +1,6 @@
 package io.siunertaq.postgres
 
-import io.circe.{Decoder, HCursor}
+import io.circe.Decoder
 
 // ─── PostgresBridgeJobDef ───────────────────────────────────────────────────
 //
