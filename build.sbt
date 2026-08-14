@@ -275,7 +275,14 @@ lazy val petersenMzv = (project in file("examples/petersen-mzv"))
   )
 
 lazy val postgresBridge = (project in file("modules/postgres-bridge"))
-  .dependsOn(core, batchBridge, petersenMzv)
+  // dhallBridge added explicitly for PostgresBridgeApp/PostgresBridgeJobDef
+  // (reuses DhallBatchRegistry.evalDhall, the dhall-to-json subprocess
+  // bridge, rather than duplicating it). Note this was already reachable
+  // transitively via batchBridge.dependsOn(core, dhallBridge) -- this
+  // line doesn't newly enable compilation, it makes an already-used
+  // dependency explicit rather than incidental, so it doesn't silently
+  // break if batchBridge's own dependency graph ever changes.
+  .dependsOn(core, batchBridge, petersenMzv, dhallBridge)
   .settings(
     name := "Siunertaq-postgres",
     scalacOptions ++= commonScalacOptions,
