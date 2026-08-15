@@ -2,7 +2,6 @@ package io.siunertaq.postgres
 
 import cats.effect.{IO, IOApp}
 import cats.effect.unsafe.IORuntime
-import io.circe.parser.decode
 import io.siunertaq.batch.DhallBatchRegistry
 import org.apache.pekko.actor.ActorSystem
 import org.springframework.batch.core.JobParameters
@@ -77,10 +76,7 @@ object PostgresBridgeApp extends IOApp.Simple:
       ))
       dhallExpr <- IO.blocking(Files.readString(dhallPath))
       json      <- DhallBatchRegistry.evalDhall(dhallExpr)
-      jobDef    <- IO.fromEither(
-                     decode[PostgresBridgeJobDef](json)
-                       .left.map(e => RuntimeException(s"PostgresBridgeJobDef decode failed: ${e.getMessage}"))
-                   )
+      jobDef    <- IO(PostgresBridgeJobDef.decodeJson(json))
 
       clickHouseSync = system.actorOf(
         ClickHouseSyncActor.props(ClickHouseConfig().fromEnv, ioRuntime),
