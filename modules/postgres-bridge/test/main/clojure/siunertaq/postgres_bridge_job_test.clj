@@ -27,7 +27,12 @@
   (.unsafeRunSync io (.global IORuntime$/MODULE$)))
 
 (def dhall-path
-  "modules/postgres-bridge/src/main/resources/PostgresBridgeJob.dhall")
+  ;; Relative to modules/postgres-bridge (clojure -X:test's cwd per
+  ;; clojure_ci.yml's working-directory setting), same convention
+  ;; schema_drift_test.clj already uses for extension/clickhouse_schema.sql
+  ;; -- NOT the repo-root-relative path PostgresBridgeApp.scala's default
+  ;; env var uses, since that one runs via sbt from the repo root instead.
+  "src/main/resources/PostgresBridgeJob.dhall")
 
 (defn- load-job-def []
   (let [expr (slurp dhall-path)
