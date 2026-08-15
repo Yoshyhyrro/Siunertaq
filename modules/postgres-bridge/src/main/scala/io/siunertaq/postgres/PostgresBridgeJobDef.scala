@@ -46,3 +46,16 @@ object PostgresBridgeJobDef:
       targets <- c.downField("targets").as[List[ClassCompilationTarget]]
     yield PostgresBridgeJobDef(jobName, targets)
   }
+
+  // Plain, ordinary-named wrapper around the circe Decoder above, throwing
+  // on failure. Exists because external JVM callers (postgres_bridge_
+  // job_test.clj, PostgresBridgeApp.scala) would otherwise need to know
+  // Scala 3's compiler-generated name for the anonymous `given` instance
+  // to invoke it directly -- a named `def` is a stable, ordinary JVM
+  // method regardless of how givens happen to compile internally, and
+  // gives both callers one shared decode-and-report-errors path instead
+  // of two copies of the same match/throw.
+  def decodeJson(json: String): PostgresBridgeJobDef =
+    io.circe.parser.decode[PostgresBridgeJobDef](json) match
+      case Right(v) => v
+      case Left(e)  => throw RuntimeException(s"PostgresBridgeJobDef decode failed: ${e.getMessage}")
