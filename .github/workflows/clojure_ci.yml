@@ -80,6 +80,17 @@ jobs:
         with:
           cli: 'latest'
 
+      # Install dhall-to-json binary for postgres_bridge_job_test.clj,
+      # which (via DhallBatchRegistry.evalDhall, the same production code
+      # PostgresBridgeApp.scala calls) validates PostgresBridgeJob.dhall
+      # for real -- same install this job's dhall-bridge counterpart
+      # already does, PostgresBridgeJob.dhall just didn't exist until now.
+      - name: Install Dhall CLI
+        run: |
+          curl -sSL https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-json-1.7.11-x86_64-Linux.tar.bz2 | tar -xj
+          sudo mv bin/dhall-to-json /usr/local/bin/
+          dhall-to-json --version
+
       # sbt setup + module compile: compilation_wiring_test.clj does real
       # JVM interop into io.siunertaq.postgres.MecrispCompiler (not a
       # transcribed model, unlike mecrisp_instr_test.clj), which needs
