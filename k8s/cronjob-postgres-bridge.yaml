@@ -1,0 +1,79 @@
+# k8s/cronjob-postgres-bridge.yaml
+#
+# Recurring run of io.siunertaq.postgres.PostgresBridgeApp against a
+# PostgresBridgeJob.dhall ConfigMap -- CronJob rather than a one-shot Job
+# on the assumption that "compile whatever .class files are declared"
+# is meant to happen on a schedule (e.g. picking up newly-built classes)
+# rather than exactly once. If that assumption is wrong and this is
+# meant to run once per deploy instead, use job-batch-bridge.yaml's Job
+# shape (spec.jobTemplate.spec below is identical either way).
+#
+# Before applying:
+#   kubectl create configmap postgres-bridge-job-dhall -n siunertaq \
+#     --from-file=PostgresBridgeJob.dhall=modules/postgres-bridge/src/main/resources/PostgresBridgeJob.dhall
+#   kubectl apply -f secret.example.yaml   # filled in, not the template
+#   kubectl apply -f cronjob-postgres-bridge.yaml
+#
+# PostgresBridgeJob.dhall's own example target
+# (io/siunertaq/postgres/example/Sample.class) is a placeholder path from
+# this module's src/main/resources -- replace it with whatever real
+# .class file(s) this deployment should actually compile before this
+# does anything useful. The ConfigMap above ships whatever's in the
+# Dhall file verbatim; class_file_path entries in it need to resolve to
+# real paths *inside this container* (this image's /app/lib/*.jar don't
+# expose individual .class files on the filesystem for
+# compileFromClassFile to read directly -- see the "Known gaps" section
+# of KUBERNETES.md for why that's flagged as still open, not silently
+# assumed to work).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: siunertaq-postgres-bridge
+  namespace: siunertaq
+spec:
+  # Placeholder -- every 15 minutes. Adjust to the real desired cadence.
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: postgres-bridge
+              image: siunertaq/postgres-bridge:latest   # built from docker/Dockerfile.postgres-bridge
+              env:
+                - name: POSTGRES_BRIDGE_JOB_DHALL
+                  value: /config/PostgresBridgeJob.dhall
+                - name: CLICKHOUSE_HOST
+                  value: clickhouse.siunertaq.svc.cluster.local
+                - name: CLICKHOUSE_PORT
+                  value: "8123"
+                - name: CLICKHOUSE_DB
+                  value: siunertaq
+                - name: CLICKHOUSE_USER
+                  value: default
+                - name: CLICKHOUSE_PASS
+                  valueFrom:
+                    secretKeyRef:
+                      name: siunertaq-db-credentials
+                      key: CLICKHOUSE_PASS
+              volumeMounts:
+                - name: postgres-bridge-job-dhall
+                  mountPath: /config
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+          volumes:
+            - name: postgres-bridge-job-dhall
+              configMap:
+                name: postgres-bridge-job-dhall
