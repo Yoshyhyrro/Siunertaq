@@ -1,0 +1,111 @@
+# syntax=docker/dockerfile:1
+#
+# docker/Dockerfile.postgres-bridge
+#
+# Runs io.siunertaq.postgres.PostgresBridgeApp: loads a PostgresBridgeJob.
+# dhall-defined list of .class files, compiles each via ClassASTBridge
+# (ASM), and pushes the result to ClickHouseSyncActor. Also a one-shot
+# batch process (no HTTP server) -- k8s Job/CronJob, not a Deployment.
+#
+# PREREQUISITE: PostgresBridgeApp.scala / CompileClassTasklet.scala /
+# PostgresBridgeJobDef.scala / PostgresBridgeJob.dhall must actually be on
+# the branch this builds from. As of this Dockerfile being written, they
+# exist on hotfix/example/rows-wordBuf_clojure-test but not yet on main --
+# this build will fail with "class not found: io.siunertaq.postgres.
+# PostgresBridgeApp" until that's merged.
+#
+# Packaging rationale, sbt-export-based classpath discovery, and the
+# "why jar every local classes dir" reasoning are identical to
+# Dockerfile.batch-bridge -- see that file's header, not repeated here.
+
+# ── Stage 1: build ───────────────────────────────────────────────────────────
+FROM eclipse-temurin:17-jdk-jammy AS build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      curl gnupg ca-certificates \
+    && echo "deb https://repo.scala-sbt.org/scalasbt/debian all main" \
+         | tee /etc/apt/sources.list.d/sbt.list \
+    && curl -sL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823" \
+         | gpg --dearmor | tee /etc/apt/trusted.gpg.d/sbt.gpg > /dev/null \
+    && apt-get update && apt-get install -y --no-install-recommends sbt \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+# postgresBridge.dependsOn(core, batchBridge, petersenMzv, dhallBridge)
+# (build.sbt) -- petersenMzv is a real compile-time dependency (see
+# PetersenVertexBSD.scala's use of io.siunertaq.batch.CondExpr/CondOp)
+# even though this image never runs anything petersen-mzv-specific, so
+# its source has to be present for `postgresBridge/compile` to succeed.
+COPY project project
+COPY build.sbt .
+COPY modules/core modules/core
+COPY modules/dhall-bridge modules/dhall-bridge
+COPY modules/batch-bridge modules/batch-bridge
+COPY examples/petersen-mzv examples/petersen-mzv
+COPY modules/postgres-bridge modules/postgres-bridge
+
+RUN sbt postgresBridge/compile
+
+RUN sbt -Dsbt.supershell=false --error \
+      'export postgresBridge/Runtime/fullClasspath' \
+      | awk '{ if (length($0) > length(longest)) longest = $0 } END { print longest }' \
+      | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' \
+      > /tmp/classpath.txt \
+    && test -s /tmp/classpath.txt \
+    && grep -q "postgres-bridge" /tmp/classpath.txt
+
+RUN mkdir -p /out/lib && i=0 && \
+    tr ':' '\n' < /tmp/classpath.txt | while read -r entry; do \
+      if [ -d "$entry" ]; then \
+        i=$((i + 1)); \
+        jar --create --file "/out/lib/local-$i.jar" -C "$entry" . ; \
+      else \
+        cp "$entry" /out/lib/ ; \
+      fi \
+    done
+
+# ── Stage 2: runtime ─────────────────────────────────────────────────────────
+FROM eclipse-temurin:17-jre-jammy
+
+# dhall-to-json: PostgresBridgeApp reads PostgresBridgeJob.dhall via
+# DhallBatchRegistry.evalDhall, which shells out to this binary -- same
+# release clojure_ci.yml's "Install Dhall CLI" step already installs, for
+# the same reason (this is the exact production code path that step's
+# test, postgres_bridge_job_test.clj, validates in CI).
+#
+# perl: transitively available because postgresBridge depends on
+# batchBridge, whose StackMachineTasklet can invoke PerlBridge.
+# PostgresBridgeApp itself only ever builds CompileClassTasklet, not
+# StackMachineTasklet, so a normal run of *this* app never touches Perl --
+# it's here so the same image could also run a BatchJob.dhall-style job
+# (io.siunertaq.batch.SiunertaqBatchApp is on this image's classpath too,
+# transitively) without a rebuild, not because PostgresBridgeApp needs it
+# for its own sake.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      perl \
+      curl \
+    && curl -sSL https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-json-1.7.11-x86_64-Linux.tar.bz2 \
+       | tar -xj -C /usr/local/bin --strip-components=1 bin/dhall-to-json \
+    && apt-get purge -y curl && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --create-home --home-dir /app siunertaq
+
+WORKDIR /app
+COPY --from=build /out/lib /app/lib
+USER siunertaq
+
+# POSTGRES_BRIDGE_JOB_DHALL: same situation as SiunertaqBatchApp's
+# BATCH_JOB_DHALL (Dockerfile.batch-bridge) -- the default
+# ("modules/postgres-bridge/src/main/resources/PostgresBridgeJob.dhall")
+# is a repo-root-relative filesystem path that doesn't exist in this
+# image, so this must always be set explicitly. See
+# k8s/configmap-postgres-bridge-job.yaml and
+# k8s/cronjob-postgres-bridge.yaml.
+#
+# CLICKHOUSE_HOST / CLICKHOUSE_PORT / CLICKHOUSE_DB / CLICKHOUSE_USER /
+# CLICKHOUSE_PASS: read by ClickHouseConfig.fromEnv (ClickHouseSync.scala)
+# -- all optional, default to localhost:8123/siunertaq/default/<empty>,
+# which will not reach a real ClickHouse from inside a Pod. Set at least
+# CLICKHOUSE_HOST in production.
+ENTRYPOINT ["java", "-cp", "/app/lib/*", "io.siunertaq.postgres.PostgresBridgeApp"]
