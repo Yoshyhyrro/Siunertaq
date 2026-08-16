@@ -1,0 +1,54 @@
+# k8s/job-batch-bridge.yaml
+#
+# One-shot run of io.siunertaq.batch.SiunertaqBatchApp against a
+# BatchJob.dhall ConfigMap. Not a CronJob: batch-bridge's own jobs
+# (Alexander-Hodge traversal etc.) read as one-off runs from everything
+# seen of this module so far -- adjust to CronJob (see
+# cronjob-postgres-bridge.yaml for the shape) if a recurring schedule
+# turns out to be wanted instead.
+#
+# Before applying:
+#   kubectl create configmap batch-job-dhall -n siunertaq \
+#     --from-file=BatchJob.dhall=modules/dhall-bridge/src/main/resources/BatchJob.dhall
+#   kubectl apply -f secret.example.yaml   # filled in, not the template
+#   kubectl apply -f job-batch-bridge.yaml
+#
+# RUN_PERL_CROSSCHECK=1 is commented out below rather than set: leaving
+# it unset (PerlBridge.maybeCheckIO's own default) means every step runs
+# without the Perl subprocess at all. Uncomment to opt a specific run
+# into the crosscheck -- see PerlBridge.scala's gating logic for exactly
+# what changes when this is set.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: siunertaq-batch-bridge
+  namespace: siunertaq
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: batch-bridge
+          image: siunertaq/batch-bridge:latest   # built from docker/Dockerfile.batch-bridge
+          env:
+            - name: BATCH_JOB_DHALL
+              value: /config/BatchJob.dhall
+            # - name: RUN_PERL_CROSSCHECK
+            #   value: "1"
+          volumeMounts:
+            - name: batch-job-dhall
+              mountPath: /config
+              readOnly: true
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: batch-job-dhall
+          configMap:
+            name: batch-job-dhall
