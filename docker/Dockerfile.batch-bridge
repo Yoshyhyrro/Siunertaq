@@ -1,0 +1,116 @@
+# syntax=docker/dockerfile:1
+#
+# docker/Dockerfile.batch-bridge
+#
+# Runs io.siunertaq.batch.SiunertaqBatchApp: loads a BatchJob.dhall-defined
+# job and executes it as Spring Batch steps (StackMachineTasklet) under
+# Pekko supervision (JobSupervisorActor). No HTTP server anywhere in this
+# module -- this is a one-shot batch process, meant for a k8s Job/CronJob,
+# not a Deployment+Service.
+#
+# Packaging: NOT a fat jar. Pekko's config loading merges reference.conf
+# from every jar on the classpath at class-load time; sbt-assembly-style
+# fat jars need a MergeStrategy.concat rule for that specific file or
+# Pekko silently loses config from whichever jar's reference.conf lost the
+# merge collision. Keeping every dependency as its own jar on the
+# classpath (stage 1 packages each into /out/lib, stage 2 runs with
+# `-cp /app/lib/*`) sidesteps that entirely -- no merge step to get wrong.
+#
+# Classpath discovery: `sbt export .../Runtime/fullClasspath` asks sbt
+# directly for the real, resolved classpath instead of guessing where
+# compiled classes end up -- the same technique (and the same reason:
+# guessing that path wrong cost several iterations) as
+# .github/workflows/clojure_ci.yml's postgres-bridge job. See that
+# workflow's inline history comments if this ever needs revisiting.
+
+# ── Stage 1: build ───────────────────────────────────────────────────────────
+FROM eclipse-temurin:17-jdk-jammy AS build
+
+# sbt via its official apt repo. The `sbt` binary itself only needs to be
+# *a* working launcher -- it bootstraps the exact version pinned in
+# project/build.properties (1.12.11) on first invocation, the same way
+# GitHub Actions' sbt/setup-sbt does. Pinning the apt package version here
+# would be redundant and another thing to keep in sync for no benefit.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      curl gnupg ca-certificates \
+    && echo "deb https://repo.scala-sbt.org/scalasbt/debian all main" \
+         | tee /etc/apt/sources.list.d/sbt.list \
+    && curl -sL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823" \
+         | gpg --dearmor | tee /etc/apt/trusted.gpg.d/sbt.gpg > /dev/null \
+    && apt-get update && apt-get install -y --no-install-recommends sbt \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+# Only the three modules this image needs (build.sbt's other lazy vals --
+# z3-bridge, yices-bridge, postgres-bridge, petersen-mzv -- are untouched
+# source on disk here, but sbt only resolves/compiles what batchBridge
+# actually depends on: core and dhallBridge).
+COPY project project
+COPY build.sbt .
+COPY modules/core modules/core
+COPY modules/dhall-bridge modules/dhall-bridge
+COPY modules/batch-bridge modules/batch-bridge
+
+RUN sbt batchBridge/compile
+
+# Longest-line extraction, not last-line: confirmed in clojure_ci.yml's
+# own history that sbt can still emit a stray trailing line (an ANSI
+# remnant, "[0J") even with supershell disabled, and the classpath --
+# dozens of colon-separated jar paths -- is always far longer than any
+# such line. sed strips any escape codes that survive onto the line
+# itself as a second line of defense.
+RUN sbt -Dsbt.supershell=false --error \
+      'export batchBridge/Runtime/fullClasspath' \
+      | awk '{ if (length($0) > length(longest)) longest = $0 } END { print longest }' \
+      | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' \
+      > /tmp/classpath.txt \
+    && test -s /tmp/classpath.txt \
+    && grep -q "batch-bridge" /tmp/classpath.txt
+
+# Every classpath entry becomes a jar under /out/lib: dependency jars are
+# copied as-is, and each module's own compiled-classes *directory* (not a
+# jar -- sbt's own build output) gets zipped with the JDK's own `jar`
+# tool. This keeps every entry in /out/lib uniformly a .jar file, which
+# matters because the JVM's `-cp dir/*` wildcard (used in stage 2) only
+# expands to *.jar in that directory -- it does not pick up subdirectories,
+# so leaving compiled-classes directories un-jarred here would silently
+# drop this module's own code from the runtime classpath.
+RUN mkdir -p /out/lib && i=0 && \
+    tr ':' '\n' < /tmp/classpath.txt | while read -r entry; do \
+      if [ -d "$entry" ]; then \
+        i=$((i + 1)); \
+        jar --create --file "/out/lib/local-$i.jar" -C "$entry" . ; \
+      else \
+        cp "$entry" /out/lib/ ; \
+      fi \
+    done
+
+# ── Stage 2: runtime ─────────────────────────────────────────────────────────
+FROM eclipse-temurin:17-jre-jammy
+
+# StackMachine.pm ships as a classpath resource inside batch-bridge's own
+# compiled classes (extracted to a temp file at runtime -- see
+# PerlBridge.scala's "classpath resource" section) -- only the `perl`
+# interpreter itself needs to be on PATH, no separate module install.
+# PerlBridge.maybeCheckIO is gated on RUN_PERL_CROSSCHECK=1 (unset by
+# default), so having perl installed here doesn't make every run pay for
+# a Perl subprocess -- it makes the crosscheck available when a Job
+# explicitly opts in via env var.
+RUN apt-get update && apt-get install -y --no-install-recommends perl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --create-home --home-dir /app siunertaq
+
+WORKDIR /app
+COPY --from=build /out/lib /app/lib
+USER siunertaq
+
+# BATCH_JOB_DHALL: SiunertaqBatchApp.scala reads this env var for which
+# Dhall file to load via a plain filesystem Paths.get (not a classpath-
+# resource lookup) -- its default
+# ("modules/dhall-bridge/src/main/resources/BatchJob.dhall") is a
+# repo-root-relative path that doesn't exist in this flattened runtime
+# image, so BATCH_JOB_DHALL must always be set explicitly here (there is
+# no working fallback). Point it at a ConfigMap-mounted file -- see
+# k8s/configmap-batch-job.yaml and k8s/job-batch-bridge.yaml.
+ENTRYPOINT ["java", "-cp", "/app/lib/*", "io.siunertaq.batch.SiunertaqBatchApp"]
