@@ -97,7 +97,20 @@ FROM eclipse-temurin:17-jre-jammy
 # default), so having perl installed here doesn't make every run pay for
 # a Perl subprocess -- it makes the crosscheck available when a Job
 # explicitly opts in via env var.
-RUN apt-get update && apt-get install -y --no-install-recommends perl \
+#
+# dhall-to-json: SiunertaqBatchApp calls DhallBatchRegistry.
+# loadBatchJobFromFile -> evalDhall at runtime, which shells out to this
+# binary, exactly the same as PostgresBridgeApp (Dockerfile.postgres-
+# bridge) -- this was missing from an earlier version of this Dockerfile
+# (caught while writing podci.yml's smoke test, not by running this
+# image, so treat it as unverified until that workflow actually goes
+# green).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      perl \
+      curl \
+    && curl -sSL https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-json-1.7.11-x86_64-Linux.tar.bz2 \
+       | tar -xj -C /usr/local/bin --strip-components=1 bin/dhall-to-json \
+    && apt-get purge -y curl && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --create-home --home-dir /app siunertaq
 

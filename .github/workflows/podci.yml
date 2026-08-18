@@ -1,0 +1,224 @@
+name: Pod CI
+
+# Builds both container images, statically validates the k8s manifests
+# against the real Kubernetes API schema (no cluster needed), and smoke-
+# runs each image. See KUBERNETES.md for the full plan and its honestly-
+# tracked open questions -- this workflow deliberately does NOT stand up
+# a real ClickHouse/Postgres or a real k8s cluster; what it validates is
+# narrower than "this works in production," see each job's comments for
+# exactly what is and isn't covered.
+
+on:
+  push:
+    branches:
+      - "example/feature/release/k8s"
+    paths:
+      - modules/core/**
+      - modules/dhall-bridge/**
+      - modules/batch-bridge/**
+      - modules/postgres-bridge/**
+      - examples/petersen-mzv/**
+      - docker/**
+      - k8s/**
+      - .github/workflows/podci.yml
+  workflow_dispatch: {}
+
+jobs:
+  build-images:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: batch-bridge
+            dockerfile: docker/Dockerfile.batch-bridge
+          - image: postgres-bridge
+            dockerfile: docker/Dockerfile.postgres-bridge
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # load: true (not push) -- these images aren't published anywhere
+      # yet; this just needs them in the local Docker daemon for the
+      # smoke-test jobs below. cache-from/to: type=gha reuses layers
+      # across runs (and across the two matrix legs, for the shared
+      # sbt/apt layers) via GitHub Actions' own cache, not a registry.
+      #
+      # PostgresBridgeApp/CompileClassTasklet/PostgresBridgeJobDef/
+      # PostgresBridgeJob.dhall (needed by docker/Dockerfile.postgres-
+      # bridge) are not on main yet -- see KUBERNETES.md's Blocker
+      # section. That leg of this matrix will fail with
+      # ClassNotFoundException until that's merged; batch-bridge doesn't
+      # depend on it and builds today.
+      - name: Build ${{ matrix.image }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          tags: siunertaq/${{ matrix.image }}:ci
+          load: true
+          push: false
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      - name: Save image for downstream jobs
+        run: docker save siunertaq/${{ matrix.image }}:ci -o /tmp/${{ matrix.image }}.tar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.image }}
+          path: /tmp/${{ matrix.image }}.tar
+          retention-days: 1
+
+  validate-manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Static schema validation against the real Kubernetes API schema --
+      # no cluster, no kubectl context needed. Confirmed working locally
+      # against all four manifests in k8s/ with this exact version before
+      # this workflow was written (kubeconform -summary -verbose k8s/*.yaml
+      # -> "4 resources found in 4 files - Valid: 4, Invalid: 0").
+      - name: Install kubeconform
+        run: |
+          curl -sSL -o kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar -xzf kubeconform.tar.gz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+          kubeconform -v
+
+      - name: Validate k8s manifests
+        run: kubeconform -summary -verbose -strict k8s/*.yaml
+
+  smoke-test-batch-bridge:
+    needs: build-images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: image-batch-bridge
+          path: /tmp
+
+      - name: Load image
+        run: docker load -i /tmp/batch-bridge.tar
+
+      # Fully self-contained: SiunertaqBatchApp's job repository is an
+      # embedded H2 database (SiunertaqBatchApp.scala's buildInfra), not
+      # Postgres/ClickHouse, so this exercises the real production Dhall
+      # file end-to-end. (Writing this smoke test caught that
+      # Dockerfile.batch-bridge's runtime stage was missing dhall-to-json
+      # -- SiunertaqBatchApp needs it via DhallBatchRegistry.evalDhall
+      # just like PostgresBridgeApp does -- that's fixed now, but treat
+      # it as unverified until this job actually goes green.)
+      #
+      # timeout: defensive, not because a hang was observed -- Pekko's
+      # coordinated shutdown semantics if an actor is mid-retry weren't
+      # verified end-to-end (see KUBERNETES.md's "hasn't been exercised
+      # even in CI yet" note), so this fails fast and loud instead of
+      # eating the whole job's time budget if that turns out to matter.
+      - name: Run SiunertaqBatchApp against the real BatchJob.dhall
+        run: |
+          timeout 90s docker run --rm \
+            -v "$PWD/modules/dhall-bridge/src/main/resources/BatchJob.dhall:/config/BatchJob.dhall:ro" \
+            -e BATCH_JOB_DHALL=/config/BatchJob.dhall \
+            siunertaq/batch-bridge:ci
+
+  smoke-test-postgres-bridge:
+    needs: build-images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Clojure
+        uses: DeLaGuardo/setup-clojure@5.0
+        with:
+          cli: 'latest'
+
+      - name: Setup sbt
+        uses: sbt/setup-sbt@v1
+
+      # Generates a real .class fixture the same way compilation-wiring-
+      # test.clj does (siunertaq.class-fixture, ASM's ClassWriter) --
+      # reused here rather than duplicated, since KUBERNETES.md's "Known
+      # gap" section explicitly flagged that this image ships no real
+      # .class file to compile. This resolves that gap for smoke-test
+      # purposes only, NOT for production -- where real .class files
+      # come from in an actual deployment is still open, see that doc.
+      - name: Compile postgres-bridge and export its classpath
+        run: |
+          sbt -Dsbt.supershell=false --error \
+            'postgresBridge/compile; export postgresBridge/Compile/fullClasspath' \
+            > /tmp/sbt-export-raw.txt 2>&1
+          awk '{ if (length($0) > length(longest)) longest = $0 } END { print longest }' \
+            /tmp/sbt-export-raw.txt \
+            | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' \
+            > /tmp/postgres-bridge.classpath
+          test -s /tmp/postgres-bridge.classpath
+          grep -q "postgres-bridge" /tmp/postgres-bridge.classpath
+
+      - name: Generate a real Sample.class fixture
+        working-directory: modules/postgres-bridge
+        run: |
+          mkdir -p /tmp/pod-smoke
+          BASE_CP=$(clojure -Spath -A:test)
+          clojure -Scp "$(cat /tmp/postgres-bridge.classpath):${BASE_CP}" \
+            -M -e "(require 'siunertaq.class-fixture) (siunertaq.class-fixture/write-sample-class-file! \"/tmp/pod-smoke/Sample.class\")"
+          test -s /tmp/pod-smoke/Sample.class
+
+      # class_file_path here is a container-internal path (/fixtures/...,
+      # bind-mounted below), NOT the repo-relative example path
+      # PostgresBridgeJob.dhall ships with -- that path only resolves on
+      # a real checkout, not inside the flattened runtime image. This is
+      # a smoke-test-only Dhall file, not a copy of the real one.
+      - name: Write a smoke-test PostgresBridgeJob.dhall
+        run: |
+          cat > /tmp/pod-smoke/smoke.dhall <<'EOF'
+          { job_name = "podci-smoke-test"
+          , targets =
+            [ { class_file_path = "/fixtures/Sample.class"
+              , target_method = "execute"
+              , target_descriptor = None Text
+              , allow_stubs = False
+              }
+            ]
+          }
+          EOF
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: image-postgres-bridge
+          path: /tmp
+
+      - name: Load image
+        run: docker load -i /tmp/postgres-bridge.tar
+
+      # No CLICKHOUSE_HOST set: ClickHouseConfig.fromEnv's default
+      # (localhost:8123, unreachable from inside this container) is left
+      # as-is on purpose. This validates the ASM-read -> compileClass ->
+      # CompileClassTasklet -> PushCompilation path end-to-end -- it does
+      # NOT validate that ClickHouse ingestion succeeds (nothing in
+      # runJob's flow blocks on ClickHouseSyncActor's own async POST, so
+      # this should exit 0 regardless of whether that POST would have
+      # succeeded). A real ingestion smoke test needs a live ClickHouse,
+      # which KUBERNETES.md already flags as not yet exercised anywhere,
+      # this workflow included.
+      - name: Run PostgresBridgeApp against the generated fixture
+        run: |
+          timeout 90s docker run --rm \
+            -v /tmp/pod-smoke:/fixtures:ro \
+            -e POSTGRES_BRIDGE_JOB_DHALL=/fixtures/smoke.dhall \
+            siunertaq/postgres-bridge:ci
