@@ -82,9 +82,11 @@ FROM eclipse-temurin:17-jre-jammy
 # (io.siunertaq.batch.SiunertaqBatchApp is on this image's classpath too,
 # transitively) without a rebuild, not because PostgresBridgeApp needs it
 # for its own sake.
+# Install bzip2 alongside perl and curl for archive extraction
 RUN apt-get update && apt-get install -y --no-install-recommends \
       perl \
       curl \
+      bzip2 \
     && curl -sSL https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-json-1.7.11-x86_64-Linux.tar.bz2 \
        | tar -xj -C /usr/local/bin --strip-components=1 bin/dhall-to-json \
     && apt-get purge -y curl && apt-get autoremove -y \
