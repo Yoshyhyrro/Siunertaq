@@ -105,9 +105,11 @@ FROM eclipse-temurin:17-jre-jammy
 # (caught while writing podci.yml's smoke test, not by running this
 # image, so treat it as unverified until that workflow actually goes
 # green).
+# Install bzip2 along with perl and curl to support tar -xj extraction
 RUN apt-get update && apt-get install -y --no-install-recommends \
       perl \
       curl \
+      bzip2 \
     && curl -sSL https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-json-1.7.11-x86_64-Linux.tar.bz2 \
        | tar -xj -C /usr/local/bin --strip-components=1 bin/dhall-to-json \
     && apt-get purge -y curl && apt-get autoremove -y \
