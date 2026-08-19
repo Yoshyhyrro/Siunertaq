@@ -11,7 +11,7 @@ name: Pod CI
 on:
   push:
     branches:
-      - "example/feature/release/k8s"
+      - "hotfix/pods/pm_dockerfile"
     paths:
       - modules/core/**
       - modules/dhall-bridge/**
