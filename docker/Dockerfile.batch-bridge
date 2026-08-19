@@ -23,6 +23,78 @@
 # .github/workflows/clojure_ci.yml's postgres-bridge job. See that
 # workflow's inline history comments if this ever needs revisiting.
 
+# ── Stage: perl (built from source) ─────────────────────────────────────────
+# Builds the `perl` interpreter itself from source instead of
+# `apt-get install perl`, using a modern GCC coaxed into accepting
+# pre-ANSI, K&R-era C via an extensive compatibility flag set (confirmed
+# working against GCC 16.2, and against source as old as Perl 3.0 (1989)
+# as a stress test of the flag set's robustness --
+# https://mirrors.develooper.com/perl/historical-perl/perl3.0.tar.gz --
+# not because Perl 3 is the actual target: Siunertaq::StackMachine.pm
+# needs Perl 5.6+ for JSON::PP as a core module, plus Perl-5-only syntax
+# (my, references, the // defined-or operator from 5.10).
+#
+# No apt-installable GCC is old enough to compile genuinely ancient K&R C
+# directly, and there's no prebuilt Perl archive for a source this old
+# targeting a modern glibc -- the fix isn't an older compiler, it's
+# telling a modern one to behave like one, flag by flag, below.
+#
+# ubuntu:22.04 rather than eclipse-temurin here: this stage needs a C
+# toolchain, not a JVM, and using the same Jammy base as stage 2's
+# eclipse-temurin:17-jre-jammy keeps the glibc this gets linked against
+# consistent with the glibc it will actually run against once copied
+# there.
+FROM ubuntu:22.04 AS perl-legacy
+
+# TODO: pin this to whichever Perl 5.x release is actually meant to ship
+# here. 5.44.0 is current stable as of this writing and satisfies
+# Siunertaq::StackMachine.pm's real requirements -- confirm before this
+# replaces the apt package below. perl3.0.tar.gz above is the known-
+# working stress test of the CFLAGS, not a real candidate for this ARG.
+ARG PERL_SRC_URL=https://www.cpan.org/src/5.0/perl-5.44.0.tar.gz
+ARG PERL_PREFIX=/usr/local/perl-legacy
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      gcc make curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Compatibility CFLAGS, transcribed verbatim from the working recipe. Do
+# not "clean up" this list without re-testing against the oldest source
+# it needs to build -- several of these exist specifically because a
+# modern GCC default silently breaks old, valid-at-the-time C (most
+# notably -fcommon: GCC 10 flipped the default to -fno-common, which
+# breaks legacy code relying on tentative definitions of the same global
+# variable across multiple files), rather than because of a diagnostic
+# that's safe to just silence.
+ENV CC=gcc
+ENV CFLAGS='-std=c90 -traditional-cpp -fcommon -fpermissive -O0 -ffreestanding -fpack-struct=4 -fno-strict-aliasing -fno-short-enums -fno-align-functions -fno-align-labels -fno-align-loops -fno-align-jumps -fno-jump-tables -fno-thread-jumps -fno-crossjumping -fno-gcse -Wno-builtin-declaration-mismatch -DMEMCPY -Dstrchr=index -Dstrrchr=rindex -UBYTEORDER -DBYTEORDER=01234567 -UCHARSPRINTF -UCPPSTDIN -DCPPSTDIN="gcc -E"'
+
+WORKDIR /src
+
+# Historical tarballs don't reliably nest a single top-level directory the
+# way modern ones do; extract into an empty directory and cd into
+# whatever's there rather than assuming --strip-components=1 is correct.
+RUN mkdir -p /src/perl-src \
+    && curl -fsSL -o /tmp/perl-src.tar.gz "${PERL_SRC_URL}" \
+    && tar -xf /tmp/perl-src.tar.gz -C /src/perl-src \
+    && rm /tmp/perl-src.tar.gz
+
+# -des: accept every Configure prompt's default, non-interactively.
+# -Dccflags is passed explicitly, in addition to the CFLAGS env var above,
+# since it isn't confirmed whether Configure's own env-var sniffing alone
+# is reliable across every source this needs to build.
+#
+# NOT verified end-to-end in CI as of this Dockerfile being written --
+# this sandbox has no reachable path to mirrors.develooper.com or
+# www.cpan.org to test-build against. Confirm this actually goes green
+# (in particular: whether `make test` should run at all for the real
+# target release -- currently skipped rather than guessed at) before it
+# replaces the apt package below.
+RUN cd /src/perl-src/*/ 2>/dev/null || cd /src/perl-src; \
+    ./Configure -des -Dprefix="${PERL_PREFIX}" -Dcc="${CC}" -Dccflags="${CFLAGS}" && \
+    make && \
+    make install
+
 # ── Stage 1: build ───────────────────────────────────────────────────────────
 FROM eclipse-temurin:17-jdk-jammy AS build
 
@@ -98,6 +170,11 @@ FROM eclipse-temurin:17-jre-jammy
 # a Perl subprocess -- it makes the crosscheck available when a Job
 # explicitly opts in via env var.
 #
+# perl itself now comes from the perl-legacy stage above (built from
+# source) rather than apt-get install perl -- see that stage's header for
+# why. Only its bin/ needs to be on PATH; nothing else in this stage
+# depends on how it got there.
+#
 # dhall-to-json: SiunertaqBatchApp calls DhallBatchRegistry.
 # loadBatchJobFromFile -> evalDhall at runtime, which shells out to this
 # binary, exactly the same as PostgresBridgeApp (Dockerfile.postgres-
@@ -105,9 +182,8 @@ FROM eclipse-temurin:17-jre-jammy
 # (caught while writing podci.yml's smoke test, not by running this
 # image, so treat it as unverified until that workflow actually goes
 # green).
-# Install bzip2 along with perl and curl to support tar -xj extraction
+# Install bzip2 along with curl to support tar -xj extraction
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      perl \
       curl \
       bzip2 \
     && curl -sSL https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-json-1.7.11-x86_64-Linux.tar.bz2 \
@@ -115,6 +191,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get purge -y curl && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --create-home --home-dir /app siunertaq
+
+COPY --from=perl-legacy /usr/local/perl-legacy /usr/local/perl-legacy
+ENV PATH="/usr/local/perl-legacy/bin:${PATH}"
 
 WORKDIR /app
 COPY --from=build /out/lib /app/lib
