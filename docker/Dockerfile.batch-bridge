@@ -39,12 +39,44 @@
 # targeting a modern glibc -- the fix isn't an older compiler, it's
 # telling a modern one to behave like one, flag by flag, below.
 #
-# ubuntu:22.04 rather than eclipse-temurin here: this stage needs a C
-# toolchain, not a JVM, and using the same Jammy base as stage 2's
-# eclipse-temurin:17-jre-jammy keeps the glibc this gets linked against
-# consistent with the glibc it will actually run against once copied
-# there.
-FROM ubuntu:22.04 AS perl-legacy
+# Base image: NOT eclipse-temurin/ubuntu:22.04 (Jammy, glibc 2.35) --
+# reproduced locally (gcc 13.3.0 / glibc 2.39) and confirmed the exact
+# reported failure is caused specifically by -traditional-cpp, isolated
+# by testing the full flag set with only that one flag removed (builds
+# clean) vs. -traditional-cpp alone against a bare `#include <stdio.h>`
+# (fails identically). Root cause: glibc's own features.h defines
+# `#define __GLIBC_USE(F) __GLIBC_USE_ ## F` and calls it unconditionally
+# from every standard header via `#if __GLIBC_USE (...)` -- traditional
+# (pre-ANSI) cpp doesn't understand `##` in a #if expression at all, so
+# this can't be worked around with more flags; it's a hard incompatibility
+# between -traditional-cpp and this glibc's own headers, not a flag
+# tuning problem. Bisected against real glibc release tags
+# (github.com/bminor/glibc) to find exactly where this landed:
+# __GLIBC_USE is absent through glibc 2.24, present from 2.25 (Feb 2017)
+# on -- confirmed clean in both features.h and sys/cdefs.h through 2.24,
+# not just grep-absent-by-name. ubuntu:16.04 ships glibc 2.23, safely on
+# the clean side of that line.
+#
+# This means stage 2's eclipse-temurin:17-jre-jammy (glibc 2.35) and this
+# stage's glibc (2.23) are now deliberately DIFFERENT versions, not
+# matched the way an earlier version of this comment argued for -- that
+# reasoning was backwards. glibc's own compatibility guarantee only runs
+# one direction (a binary linked against an older glibc runs fine against
+# a newer one; the reverse doesn't hold), so building perl-legacy against
+# the oldest glibc that still compiles is the same direction that
+# guarantee already points, and stage 2 copying it out and running it
+# under a newer glibc is exactly the supported case, not a mismatch.
+#
+# NOT verified beyond this: ubuntu:16.04 is EOL, so its default apt
+# sources 404 without the old-releases.ubuntu.com redirect below --
+# that redirect is the standard, well-documented fix for this, but this
+# sandbox has no reachable path to old-releases.ubuntu.com to confirm it
+# still resolves correctly today. If ubuntu:16.04's image itself has
+# been pulled from Docker Hub entirely by the time this runs, Debian 9
+# "stretch" (glibc 2.24 -- confirmed clean above, right at the boundary
+# rather than comfortably inside it) is the fallback candidate, with the
+# equivalent archive.debian.org redirect.
+FROM ubuntu:16.04 AS perl-legacy
 
 # TODO: pin this to whichever Perl 5.x release is actually meant to ship
 # here. 5.44.0 is current stable as of this writing and satisfies
@@ -53,10 +85,27 @@ FROM ubuntu:22.04 AS perl-legacy
 # working stress test of the CFLAGS, not a real candidate for this ARG.
 ARG PERL_SRC_URL=https://www.cpan.org/src/5.0/perl-5.44.0.tar.gz
 ARG PERL_PREFIX=/usr/local/perl-legacy
+# CC as its own ARG (promoted to ENV below), not hardcoded, in case this
+# ends up needing a newer compiler than whatever ubuntu:16.04's own apt
+# repos resolve `gcc`/build-essential to (gcc 5.x) -- e.g. via a PPA, if
+# gcc 5 turns out to choke on something the working recipe's GCC 16.2
+# didn't. Nothing below has been tested against gcc 5 specifically.
+ARG CC=gcc
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# EOL redirect: ubuntu:16.04's baked-in sources.list points at
+# archive.ubuntu.com/security.ubuntu.com, which stop serving Xenial once
+# it ages out of standard support -- old-releases.ubuntu.com is
+# Canonical's documented long-term archive for exactly this. Ubuntu
+# codename is xenial; adjust if the fallback (Debian 9 "stretch") is used
+# instead, whose equivalent is archive.debian.org.
+RUN sed -i \
+      -e 's|http://archive.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' \
+      -e 's|http://security.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' \
+      /etc/apt/sources.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
       build-essential curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+ENV CC=${CC}
 
 # Compatibility CFLAGS, transcribed verbatim from the working recipe --
 # but with cppstdin/byteorder/charsprintf split back out (see the RUN
@@ -71,7 +120,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # -fpermissive triggers "valid for C++/ObjC++ but not for C" from cc1 on
 # every compile -- confirmed benign (a no-op warning, not a build
 # failure), left in as given rather than removed unilaterally.
-ENV CC=gcc
 ENV CFLAGS='-std=c90 -traditional-cpp -fcommon -fpermissive -O0 -ffreestanding -fpack-struct=4 -fno-strict-aliasing -fno-short-enums -fno-align-functions -fno-align-labels -fno-align-loops -fno-align-jumps -fno-jump-tables -fno-thread-jumps -fno-crossjumping -fno-gcse -Wno-builtin-declaration-mismatch -DMEMCPY -Dstrchr=index -Dstrrchr=rindex'
 
 WORKDIR /src
