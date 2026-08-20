@@ -58,16 +58,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       gcc make curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Compatibility CFLAGS, transcribed verbatim from the working recipe. Do
-# not "clean up" this list without re-testing against the oldest source
-# it needs to build -- several of these exist specifically because a
-# modern GCC default silently breaks old, valid-at-the-time C (most
-# notably -fcommon: GCC 10 flipped the default to -fno-common, which
-# breaks legacy code relying on tentative definitions of the same global
-# variable across multiple files), rather than because of a diagnostic
-# that's safe to just silence.
+# Compatibility CFLAGS, transcribed verbatim from the working recipe --
+# but with cppstdin/byteorder/charsprintf split back out (see the RUN
+# step below for why). Do not "clean up" what's left here without
+# re-testing against the oldest source it needs to build -- several of
+# these exist specifically because a modern GCC default silently breaks
+# old, valid-at-the-time C (most notably -fcommon: GCC 10 flipped the
+# default to -fno-common, which breaks legacy code relying on tentative
+# definitions of the same global variable across multiple files), rather
+# than because of a diagnostic that's safe to just silence.
 ENV CC=gcc
-ENV CFLAGS='-std=c90 -traditional-cpp -fcommon -fpermissive -O0 -ffreestanding -fpack-struct=4 -fno-strict-aliasing -fno-short-enums -fno-align-functions -fno-align-labels -fno-align-loops -fno-align-jumps -fno-jump-tables -fno-thread-jumps -fno-crossjumping -fno-gcse -Wno-builtin-declaration-mismatch -DMEMCPY -Dstrchr=index -Dstrrchr=rindex -UBYTEORDER -DBYTEORDER=01234567 -UCHARSPRINTF -UCPPSTDIN -DCPPSTDIN="gcc -E"'
+ENV CFLAGS='-std=c90 -traditional-cpp -fcommon -fpermissive -O0 -ffreestanding -fpack-struct=4 -fno-strict-aliasing -fno-short-enums -fno-align-functions -fno-align-labels -fno-align-loops -fno-align-jumps -fno-jump-tables -fno-thread-jumps -fno-crossjumping -fno-gcse -Wno-builtin-declaration-mismatch -DMEMCPY -Dstrchr=index -Dstrrchr=rindex'
 
 WORKDIR /src
 
@@ -80,9 +81,28 @@ RUN mkdir -p /src/perl-src \
     && rm /tmp/perl-src.tar.gz
 
 # -des: accept every Configure prompt's default, non-interactively.
-# -Dccflags is passed explicitly, in addition to the CFLAGS env var above,
-# since it isn't confirmed whether Configure's own env-var sniffing alone
-# is reliable across every source this needs to build.
+#
+# cppstdin/byteorder/charsprintf are passed as their own Configure
+# -Dname=value arguments (Configure's *own* -D convention for presetting
+# a config.sh variable -- unrelated to, despite the identical spelling,
+# gcc's -D preprocessor-macro flag) rather than folded into -Dccflags
+# above. The first attempt embedded -DCPPSTDIN="gcc -E" inside the
+# ccflags string itself; whatever consumes ccflags downstream splits on
+# whitespace with no awareness of the quote characters, so "gcc and -E"
+# arrived at the real gcc invocation as two broken tokens (gcc: error:
+# unrecognized command-line option '-E"'). -Dcppstdin='gcc -E' passed
+# directly on this command line is parsed once, correctly, by *this*
+# shell before Configure ever sees it, so the embedded space survives.
+#
+# TODO: cppstdin/byteorder/charsprintf were part of the flag set
+# confirmed against perl3.0.tar.gz specifically -- not yet confirmed
+# whether Perl 5.44.0's own Configure needs any of these three
+# overridden at all (it may auto-probe correct values on a standard
+# glibc/x86_64 or arm64 target without help). If this still fails with
+# these three included, try dropping all three -D/-U lines below entirely
+# before troubleshooting further. Also unconfirmed: whether the real
+# Configure variable for "does sprintf return char*" is actually spelled
+# d_charsprintf -- that one's a best guess, not a verified name.
 #
 # NOT verified end-to-end in CI as of this Dockerfile being written --
 # this sandbox has no reachable path to mirrors.develooper.com or
@@ -91,7 +111,13 @@ RUN mkdir -p /src/perl-src \
 # target release -- currently skipped rather than guessed at) before it
 # replaces the apt package below.
 RUN cd /src/perl-src/*/ 2>/dev/null || cd /src/perl-src; \
-    ./Configure -des -Dprefix="${PERL_PREFIX}" -Dcc="${CC}" -Dccflags="${CFLAGS}" && \
+    ./Configure -des \
+      -Dprefix="${PERL_PREFIX}" \
+      -Dcc="${CC}" \
+      -Dccflags="${CFLAGS}" \
+      -Dcppstdin='gcc -E' \
+      -Dbyteorder=01234567 \
+      -Ud_charsprintf && \
     make && \
     make install
 
