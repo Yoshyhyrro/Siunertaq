@@ -55,7 +55,7 @@ ARG PERL_SRC_URL=https://www.cpan.org/src/5.0/perl-5.44.0.tar.gz
 ARG PERL_PREFIX=/usr/local/perl-legacy
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      gcc make curl ca-certificates \
+      build-essential curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Compatibility CFLAGS, transcribed verbatim from the working recipe --
@@ -67,6 +67,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # default to -fno-common, which breaks legacy code relying on tentative
 # definitions of the same global variable across multiple files), rather
 # than because of a diagnostic that's safe to just silence.
+#
+# -fpermissive triggers "valid for C++/ObjC++ but not for C" from cc1 on
+# every compile -- confirmed benign (a no-op warning, not a build
+# failure), left in as given rather than removed unilaterally.
 ENV CC=gcc
 ENV CFLAGS='-std=c90 -traditional-cpp -fcommon -fpermissive -O0 -ffreestanding -fpack-struct=4 -fno-strict-aliasing -fno-short-enums -fno-align-functions -fno-align-labels -fno-align-loops -fno-align-jumps -fno-jump-tables -fno-thread-jumps -fno-crossjumping -fno-gcse -Wno-builtin-declaration-mismatch -DMEMCPY -Dstrchr=index -Dstrrchr=rindex'
 
