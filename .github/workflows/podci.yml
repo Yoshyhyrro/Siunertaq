@@ -80,9 +80,11 @@ jobs:
 
       # Static schema validation against the real Kubernetes API schema --
       # no cluster, no kubectl context needed. Confirmed working locally
-      # against all four manifests in k8s/ with this exact version before
-      # this workflow was written (kubeconform -summary -verbose k8s/*.yaml
-      # -> "4 resources found in 4 files - Valid: 4, Invalid: 0").
+      # against the three manifests actually in k8s/ (kubeconform
+      # -summary -verbose -strict k8s/*.yaml -> "3 resources found in 3
+      # files - Valid: 3, Invalid: 0, Errors: 0, Skipped: 0"). Namespace.yaml
+      # lives at the repo root, not under k8s/, so it isn't covered by
+      # this glob -- apply it separately.
       - name: Install kubeconform
         run: |
           curl -sSL -o kubeconform.tar.gz \
