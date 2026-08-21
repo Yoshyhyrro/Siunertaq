@@ -25,8 +25,19 @@
 
 # ── Stage: perl (built from source) ─────────────────────────────────────────
 # Builds the `perl` interpreter itself from source instead of
-# `apt-get install perl`, using a modern GCC coaxed into accepting
-# pre-ANSI, K&R-era C via an extensive compatibility flag set (confirmed
+# `apt-get install perl`. The point isn't just "make perl available" --
+# apt-get already did that -- it's that PerlBridge/StackMachine.pm's role
+# as an independent cross-check of the StackInstr IR is only as strong as
+# how trustworthy that interpreter's own provenance is. Perl and Clojure
+# (siunertaq.batch-runner/execute-program) have already been confirmed to
+# agree on this IR instruction-for-instruction (PushScalar/PushVec3/
+# AddScalar/AddVec3/MulScalar/DotVec3, matching StackMachine.pm's
+# execute_json dispatch exactly) -- what this stage is for is making the
+# interpreter underneath that agreement something this repo actually
+# builds and ships, reproducibly, down to the C layer, rather than
+# something whatever `perl` a given apt mirror happens to resolve to on a
+# given day. That means using a modern GCC coaxed into accepting pre-
+# ANSI, K&R-era C via an extensive compatibility flag set (confirmed
 # working against GCC 16.2, and against source as old as Perl 3.0 (1989)
 # as a stress test of the flag set's robustness --
 # https://mirrors.develooper.com/perl/historical-perl/perl3.0.tar.gz --
@@ -54,29 +65,44 @@
 # (github.com/bminor/glibc) to find exactly where this landed:
 # __GLIBC_USE is absent through glibc 2.24, present from 2.25 (Feb 2017)
 # on -- confirmed clean in both features.h and sys/cdefs.h through 2.24,
-# not just grep-absent-by-name. ubuntu:16.04 ships glibc 2.23, safely on
-# the clean side of that line.
+# not just grep-absent-by-name.
+#
+# debian:stretch ships glibc 2.24 -- right at that clean boundary, chosen
+# (over e.g. ubuntu:16.04's more comfortably-clean glibc 2.23) because
+# its EOL archive setup below is simpler to get right and keep working:
+# one sources.list rewrite plus one apt.conf knob, no dependency on
+# exactly how a given Ubuntu point release's default sources.list is
+# formatted for a sed pattern to match.
 #
 # This means stage 2's eclipse-temurin:17-jre-jammy (glibc 2.35) and this
-# stage's glibc (2.23) are now deliberately DIFFERENT versions, not
-# matched the way an earlier version of this comment argued for -- that
-# reasoning was backwards. glibc's own compatibility guarantee only runs
-# one direction (a binary linked against an older glibc runs fine against
-# a newer one; the reverse doesn't hold), so building perl-legacy against
+# stage's glibc (2.24) are deliberately DIFFERENT versions, not matched
+# the way an earlier version of this comment argued for -- that reasoning
+# was backwards. glibc's own compatibility guarantee only runs one
+# direction (a binary linked against an older glibc runs fine against a
+# newer one; the reverse doesn't hold), so building perl-legacy against
 # the oldest glibc that still compiles is the same direction that
 # guarantee already points, and stage 2 copying it out and running it
 # under a newer glibc is exactly the supported case, not a mismatch.
 #
-# NOT verified beyond this: ubuntu:16.04 is EOL, so its default apt
-# sources 404 without the old-releases.ubuntu.com redirect below --
-# that redirect is the standard, well-documented fix for this, but this
-# sandbox has no reachable path to old-releases.ubuntu.com to confirm it
-# still resolves correctly today. If ubuntu:16.04's image itself has
-# been pulled from Docker Hub entirely by the time this runs, Debian 9
-# "stretch" (glibc 2.24 -- confirmed clean above, right at the boundary
-# rather than comfortably inside it) is the fallback candidate, with the
-# equivalent archive.debian.org redirect.
-FROM ubuntu:16.04 AS perl-legacy
+# Reproducibility: archive.debian.org is a frozen, unchanging mirror by
+# design (that's *why* Check-Valid-Until has to be disabled below -- its
+# Release file's validity window has already passed and will never be
+# renewed), which cuts the right way for this stage's actual goal -- a
+# rebuild a year from now hitting the exact same package versions is a
+# feature here, not a risk to route around. What's NOT yet verified: (1)
+# this sandbox has no reachable path to archive.debian.org to confirm the
+# redirect below still resolves today; (2) archive.debian.org's signing
+# keys may themselves have since expired, in which case apt-get update
+# will fail on a keyring/NO_PUBKEY error rather than the Check-Valid-
+# Until one this already routes around -- if that happens, `[trusted=yes]`
+# on each deb line (below) is the standard escape hatch, appropriate here
+# since this stage's own output is verified by actually running it, not
+# by apt's signature chain. (3) debian:stretch's default apt gcc (6.3)
+# has not been confirmed against this exact flag set the way GCC 16.2
+# was -- everything below is long-standing, stable gcc behavior with no
+# specific reason to expect 6.3 to differ, but "no specific reason to
+# expect a difference" is a weaker claim than "confirmed."
+FROM debian:stretch AS perl-legacy
 
 # TODO: pin this to whichever Perl 5.x release is actually meant to ship
 # here. 5.44.0 is current stable as of this writing and satisfies
@@ -86,22 +112,32 @@ FROM ubuntu:16.04 AS perl-legacy
 ARG PERL_SRC_URL=https://www.cpan.org/src/5.0/perl-5.44.0.tar.gz
 ARG PERL_PREFIX=/usr/local/perl-legacy
 # CC as its own ARG (promoted to ENV below), not hardcoded, in case this
-# ends up needing a newer compiler than whatever ubuntu:16.04's own apt
-# repos resolve `gcc`/build-essential to (gcc 5.x) -- e.g. via a PPA, if
-# gcc 5 turns out to choke on something the working recipe's GCC 16.2
-# didn't. Nothing below has been tested against gcc 5 specifically.
+# ends up needing a newer compiler than whatever debian:stretch's own apt
+# repos resolve `gcc`/build-essential to (gcc 6.3) -- e.g. via a
+# backports/manual install, if gcc 6.3 turns out to choke on something
+# the working recipe's GCC 16.2 didn't. Nothing below has been tested
+# against gcc 6.3 specifically.
 ARG CC=gcc
 
-# EOL redirect: ubuntu:16.04's baked-in sources.list points at
-# archive.ubuntu.com/security.ubuntu.com, which stop serving Xenial once
-# it ages out of standard support -- old-releases.ubuntu.com is
-# Canonical's documented long-term archive for exactly this. Ubuntu
-# codename is xenial; adjust if the fallback (Debian 9 "stretch") is used
-# instead, whose equivalent is archive.debian.org.
-RUN sed -i \
-      -e 's|http://archive.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' \
-      -e 's|http://security.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' \
-      /etc/apt/sources.list \
+# EOL archive redirect + Check-Valid-Until: debian:stretch's baked-in
+# sources.list points at deb.debian.org, which stops serving stretch once
+# it ages out of LTS support -- archive.debian.org is Debian's permanent
+# archive for exactly this. Check-Valid-Until has to be disabled
+# separately: archive.debian.org intentionally never re-signs a Release
+# file with a fresh Valid-Until, so apt's normal expiry check would
+# reject it unconditionally, forever, not just today -- this isn't
+# working around a temporary staleness, it's acknowledging the archive is
+# permanently frozen by design (see this stage's header for why that's a
+# feature here, not a workaround). If apt-get update instead fails on a
+# keyring/NO_PUBKEY error (Debian's archive signing keys are a separate
+# expiry from Valid-Until, not yet hit here), add `[trusted=yes]` to each
+# deb line below rather than chasing down a keyring package for an EOL
+# release.
+RUN printf 'deb http://archive.debian.org/debian stretch main\n\
+deb http://archive.debian.org/debian-security stretch/updates main\n' \
+      > /etc/apt/sources.list \
+    && echo 'Acquire::Check-Valid-Until "false";' \
+      > /etc/apt/apt.conf.d/99no-check-valid-until \
     && apt-get update && apt-get install -y --no-install-recommends \
       build-essential curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
