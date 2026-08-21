@@ -1,0 +1,1412 @@
+diff --git a/.github/workflows/clojure_ci.yml b/.github/workflows/clojure_ci.yml
+index ca1ea37..acd0805 100644
+--- a/.github/workflows/clojure_ci.yml
++++ b/.github/workflows/clojure_ci.yml
+@@ -3,7 +3,7 @@ name: Clojure CI
+ on:
+   push:
+     branches:
+-      - "example/feature/clojure_Alexander–Hodge"
++      - "hotfix/example/rows-wordBuf_clojure-test"
+     paths:
+       - modules/dhall-bridge/**
+       - modules/postgres-bridge/**
+@@ -80,6 +80,17 @@ jobs:
+         with:
+           cli: 'latest'
+ 
++      # Install dhall-to-json binary for postgres_bridge_job_test.clj,
++      # which (via DhallBatchRegistry.evalDhall, the same production code
++      # PostgresBridgeApp.scala calls) validates PostgresBridgeJob.dhall
++      # for real -- same install this job's dhall-bridge counterpart
++      # already does, PostgresBridgeJob.dhall just didn't exist until now.
++      - name: Install Dhall CLI
++        run: |
++          curl -sSL https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-json-1.7.11-x86_64-Linux.tar.bz2 | tar -xj
++          sudo mv bin/dhall-to-json /usr/local/bin/
++          dhall-to-json --version
++
+       # sbt setup + module compile: compilation_wiring_test.clj does real
+       # JVM interop into io.siunertaq.postgres.MecrispCompiler (not a
+       # transcribed model, unlike mecrisp_instr_test.clj), which needs
+diff --git a/.github/workflows/cvc5ci.yml b/.github/workflows/cvc5ci.yml
+index 219e3c1..033ad32 100644
+--- a/.github/workflows/cvc5ci.yml
++++ b/.github/workflows/cvc5ci.yml
+@@ -2,7 +2,7 @@ name: CVC5 Verification Pipeline
+ 
+ on:
+   push:
+-    branches: [ "main" ]
++    branches: [ "hotfix/rows-wordBuf" ]
+   pull_request:
+ 
+ jobs:
+diff --git a/.github/workflows/podci.yml b/.github/workflows/podci.yml
+new file mode 100644
+index 0000000..1342806
+--- /dev/null
++++ b/.github/workflows/podci.yml
+@@ -0,0 +1,224 @@
++name: Pod CI
++
++# Builds both container images, statically validates the k8s manifests
++# against the real Kubernetes API schema (no cluster needed), and smoke-
++# runs each image. See KUBERNETES.md for the full plan and its honestly-
++# tracked open questions -- this workflow deliberately does NOT stand up
++# a real ClickHouse/Postgres or a real k8s cluster; what it validates is
++# narrower than "this works in production," see each job's comments for
++# exactly what is and isn't covered.
++
++on:
++  push:
++    branches:
++      - "example/feature/release/k8s"
++    paths:
++      - modules/core/**
++      - modules/dhall-bridge/**
++      - modules/batch-bridge/**
++      - modules/postgres-bridge/**
++      - examples/petersen-mzv/**
++      - docker/**
++      - k8s/**
++      - .github/workflows/podci.yml
++  workflow_dispatch: {}
++
++jobs:
++  build-images:
++    runs-on: ubuntu-latest
++    strategy:
++      matrix:
++        include:
++          - image: batch-bridge
++            dockerfile: docker/Dockerfile.batch-bridge
++          - image: postgres-bridge
++            dockerfile: docker/Dockerfile.postgres-bridge
++    steps:
++      - name: Checkout repository
++        uses: actions/checkout@v4
++
++      - name: Set up Docker Buildx
++        uses: docker/setup-buildx-action@v3
++
++      # load: true (not push) -- these images aren't published anywhere
++      # yet; this just needs them in the local Docker daemon for the
++      # smoke-test jobs below. cache-from/to: type=gha reuses layers
++      # across runs (and across the two matrix legs, for the shared
++      # sbt/apt layers) via GitHub Actions' own cache, not a registry.
++      #
++      # PostgresBridgeApp/CompileClassTasklet/PostgresBridgeJobDef/
++      # PostgresBridgeJob.dhall (needed by docker/Dockerfile.postgres-
++      # bridge) are not on main yet -- see KUBERNETES.md's Blocker
++      # section. That leg of this matrix will fail with
++      # ClassNotFoundException until that's merged; batch-bridge doesn't
++      # depend on it and builds today.
++      - name: Build ${{ matrix.image }} image
++        uses: docker/build-push-action@v6
++        with:
++          context: .
++          file: ${{ matrix.dockerfile }}
++          tags: siunertaq/${{ matrix.image }}:ci
++          load: true
++          push: false
++          cache-from: type=gha,scope=${{ matrix.image }}
++          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
++
++      - name: Save image for downstream jobs
++        run: docker save siunertaq/${{ matrix.image }}:ci -o /tmp/${{ matrix.image }}.tar
++
++      - uses: actions/upload-artifact@v4
++        with:
++          name: image-${{ matrix.image }}
++          path: /tmp/${{ matrix.image }}.tar
++          retention-days: 1
++
++  validate-manifests:
++    runs-on: ubuntu-latest
++    steps:
++      - name: Checkout repository
++        uses: actions/checkout@v4
++
++      # Static schema validation against the real Kubernetes API schema --
++      # no cluster, no kubectl context needed. Confirmed working locally
++      # against all four manifests in k8s/ with this exact version before
++      # this workflow was written (kubeconform -summary -verbose k8s/*.yaml
++      # -> "4 resources found in 4 files - Valid: 4, Invalid: 0").
++      - name: Install kubeconform
++        run: |
++          curl -sSL -o kubeconform.tar.gz \
++            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
++          tar -xzf kubeconform.tar.gz kubeconform
++          sudo mv kubeconform /usr/local/bin/
++          kubeconform -v
++
++      - name: Validate k8s manifests
++        run: kubeconform -summary -verbose -strict k8s/*.yaml
++
++  smoke-test-batch-bridge:
++    needs: build-images
++    runs-on: ubuntu-latest
++    steps:
++      - name: Checkout repository
++        uses: actions/checkout@v4
++
++      - uses: actions/download-artifact@v4
++        with:
++          name: image-batch-bridge
++          path: /tmp
++
++      - name: Load image
++        run: docker load -i /tmp/batch-bridge.tar
++
++      # Fully self-contained: SiunertaqBatchApp's job repository is an
++      # embedded H2 database (SiunertaqBatchApp.scala's buildInfra), not
++      # Postgres/ClickHouse, so this exercises the real production Dhall
++      # file end-to-end. (Writing this smoke test caught that
++      # Dockerfile.batch-bridge's runtime stage was missing dhall-to-json
++      # -- SiunertaqBatchApp needs it via DhallBatchRegistry.evalDhall
++      # just like PostgresBridgeApp does -- that's fixed now, but treat
++      # it as unverified until this job actually goes green.)
++      #
++      # timeout: defensive, not because a hang was observed -- Pekko's
++      # coordinated shutdown semantics if an actor is mid-retry weren't
++      # verified end-to-end (see KUBERNETES.md's "hasn't been exercised
++      # even in CI yet" note), so this fails fast and loud instead of
++      # eating the whole job's time budget if that turns out to matter.
++      - name: Run SiunertaqBatchApp against the real BatchJob.dhall
++        run: |
++          timeout 90s docker run --rm \
++            -v "$PWD/modules/dhall-bridge/src/main/resources/BatchJob.dhall:/config/BatchJob.dhall:ro" \
++            -e BATCH_JOB_DHALL=/config/BatchJob.dhall \
++            siunertaq/batch-bridge:ci
++
++  smoke-test-postgres-bridge:
++    needs: build-images
++    runs-on: ubuntu-latest
++    steps:
++      - name: Checkout repository
++        uses: actions/checkout@v4
++
++      - name: Set up JDK 17
++        uses: actions/setup-java@v4
++        with:
++          distribution: temurin
++          java-version: '17'
++
++      - name: Setup Clojure
++        uses: DeLaGuardo/setup-clojure@5.0
++        with:
++          cli: 'latest'
++
++      - name: Setup sbt
++        uses: sbt/setup-sbt@v1
++
++      # Generates a real .class fixture the same way compilation-wiring-
++      # test.clj does (siunertaq.class-fixture, ASM's ClassWriter) --
++      # reused here rather than duplicated, since KUBERNETES.md's "Known
++      # gap" section explicitly flagged that this image ships no real
++      # .class file to compile. This resolves that gap for smoke-test
++      # purposes only, NOT for production -- where real .class files
++      # come from in an actual deployment is still open, see that doc.
++      - name: Compile postgres-bridge and export its classpath
++        run: |
++          sbt -Dsbt.supershell=false --error \
++            'postgresBridge/compile; export postgresBridge/Compile/fullClasspath' \
++            > /tmp/sbt-export-raw.txt 2>&1
++          awk '{ if (length($0) > length(longest)) longest = $0 } END { print longest }' \
++            /tmp/sbt-export-raw.txt \
++            | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' \
++            > /tmp/postgres-bridge.classpath
++          test -s /tmp/postgres-bridge.classpath
++          grep -q "postgres-bridge" /tmp/postgres-bridge.classpath
++
++      - name: Generate a real Sample.class fixture
++        working-directory: modules/postgres-bridge
++        run: |
++          mkdir -p /tmp/pod-smoke
++          BASE_CP=$(clojure -Spath -A:test)
++          clojure -Scp "$(cat /tmp/postgres-bridge.classpath):${BASE_CP}" \
++            -M -e "(require 'siunertaq.class-fixture) (siunertaq.class-fixture/write-sample-class-file! \"/tmp/pod-smoke/Sample.class\")"
++          test -s /tmp/pod-smoke/Sample.class
++
++      # class_file_path here is a container-internal path (/fixtures/...,
++      # bind-mounted below), NOT the repo-relative example path
++      # PostgresBridgeJob.dhall ships with -- that path only resolves on
++      # a real checkout, not inside the flattened runtime image. This is
++      # a smoke-test-only Dhall file, not a copy of the real one.
++      - name: Write a smoke-test PostgresBridgeJob.dhall
++        run: |
++          cat > /tmp/pod-smoke/smoke.dhall <<'EOF'
++          { job_name = "podci-smoke-test"
++          , targets =
++            [ { class_file_path = "/fixtures/Sample.class"
++              , target_method = "execute"
++              , target_descriptor = None Text
++              , allow_stubs = False
++              }
++            ]
++          }
++          EOF
++
++      - uses: actions/download-artifact@v4
++        with:
++          name: image-postgres-bridge
++          path: /tmp
++
++      - name: Load image
++        run: docker load -i /tmp/postgres-bridge.tar
++
++      # No CLICKHOUSE_HOST set: ClickHouseConfig.fromEnv's default
++      # (localhost:8123, unreachable from inside this container) is left
++      # as-is on purpose. This validates the ASM-read -> compileClass ->
++      # CompileClassTasklet -> PushCompilation path end-to-end -- it does
++      # NOT validate that ClickHouse ingestion succeeds (nothing in
++      # runJob's flow blocks on ClickHouseSyncActor's own async POST, so
++      # this should exit 0 regardless of whether that POST would have
++      # succeeded). A real ingestion smoke test needs a live ClickHouse,
++      # which KUBERNETES.md already flags as not yet exercised anywhere,
++      # this workflow included.
++      - name: Run PostgresBridgeApp against the generated fixture
++        run: |
++          timeout 90s docker run --rm \
++            -v /tmp/pod-smoke:/fixtures:ro \
++            -e POSTGRES_BRIDGE_JOB_DHALL=/fixtures/smoke.dhall \
++            siunertaq/postgres-bridge:ci
+diff --git a/.github/workflows/yices_test_ci.yml b/.github/workflows/yices_test_ci.yml
+index b07c974..c2efce4 100644
+--- a/.github/workflows/yices_test_ci.yml
++++ b/.github/workflows/yices_test_ci.yml
+@@ -4,7 +4,7 @@ on:
+   workflow_dispatch:
+   push:
+     branches:
+-      - example/feature/clojure_Alexander–Hodge
++      - hotfix/rows-wordBuf
+     paths:
+       - build.sbt
+       - modules/core/**
+diff --git a/Namespace.yaml b/Namespace.yaml
+new file mode 100644
+index 0000000..8a23a63
+--- /dev/null
++++ b/Namespace.yaml
+@@ -0,0 +1,4 @@
++apiVersion: v1
++kind: Namespace
++metadata:
++  name: siunertaq
+\ No newline at end of file
+diff --git a/README.md b/README.md
+index 365e881..8d22e9a 100644
+--- a/README.md
++++ b/README.md
+@@ -398,15 +398,17 @@ examples/
+ ## Release Notes
+ 
+ See the [GitHub Releases](../../releases) page for the full changelog.
+-The most recent release is **[v0.1.1.alpha.1](../../releases/tag/v0.1.1.alpha.1)** —
+-shared StackInstr JSON, `Siunertaq::StackMachine.pm`, and full `PerlBridgeSpec` green (32/32).
++The most recent release is **[v0.1.1.alpha.2](../../releases/tag/v0.1.1.alpha.2)** —
++`postgres-bridge`'s `.class` → Mecrisp Forth → ClickHouse pipeline wired end-to-end, SPARK's first proof
++output about this project's own domain, and `dhall-bridge`'s Clojure/Alexander–Hodge work.
+ 
+ ## Current status
+ 
+ - Arithmetic IR and threshold AST implemented; all core tests passing.
+ - Yices and Z3 verification lanes separated and independently runnable.
+ - GitHub Actions CI validates the Yices path on `ubuntu-latest` with the real solver binary.
+-- Codebase prepared for SPARK/Ada proof packages: `lower` and S-expression round-trips already have ScalaTest specs that serve as ground-truth witnesses.
++- SPARK/Ada proof pipeline produced its first proof output about this project's own domain (previously it exercised a disconnected placeholder): `Math_Types`/`Math_Program`/`Proof_Target` implement the same 6-instruction stack machine as the Scala `sealed trait Value` / `ProgramEval.exec` pair, and CVC5 proves `Required_Depth`/`Depth_Delta` always terminate and that `Exec_One`'s stack-index access can never go out of bounds for any input satisfying its precondition — proved impossible, not just untested. `Exec_Program`'s general well-typedness precondition is not yet proved (see Future work).
++- `dhall-bridge` gained a Clojure implementation alongside its Dhall/Scala side (`morton.clj`, `batch_runner.clj`, `flock_diagnostics.clj`): Morton (Z-order) encoding, JCL `COND`-statement evaluation via a `dhall-to-json` subprocess, and flock-size diagnostics, with an AVX2 SIMD mock exercised by `batch_runner_test.clj`.
+ - `batch-bridge` compiles cleanly under Scala 3.8.3 with `-language:strictEquality`: `BatchJob.dhall` → `BatchJobDef` → Spring Batch step execution driven by the BSD Quiver stack machine, with JCL-inspired `CondExpr` execution control and Pekko `OneForOneStrategy` fault isolation.
+ - `PerlBridge` provides opt-in Scala/Perl differential testing (`RUN_PERL_CROSSCHECK=1`). Generated `.pl` scripts delegate all stack-machine logic to `Siunertaq::StackMachine.pm` via `JSON::PP` — the same `{"PushScalar":{"n":5}}` format emitted by `ClassASTBridge` and stored in the PostgreSQL `instructions` column. `PerlBridgeSpec` runs 32 tests green in CI, including a full subprocess integration suite.
+ - `Program.toJson` in `core` is the canonical StackInstr JSON format shared by `.class` analysis (`ClassASTBridge`), PostgreSQL JSONB (`ForthRegistrar`), and Perl execution (`Siunertaq::StackMachine->execute_json`).
+@@ -419,6 +421,7 @@ shared StackInstr JSON, `Siunertaq::StackMachine.pm`, and full `PerlBridgeSpec`
+ - `MachineConstants` separates the logarithmic `galoisHeight` (GIT semistability mask) from the linear `octadHeight` (Berkovich tree position) and grounds the tower in IEEE 754 via `machineEpsilonReal = 2⁻⁵²` and `valuationDepth = 52`.
+ - `YangBaxterBanach` supplies the Satake spectral parameter bridge (`SpiralRotation → spiralToSpectralParam → PhantomCarabiner`) and the rational GL₂ R-matrix.
+ - v0.1.1.alpha.1: all six active modules (`core`, `z3Bridge`, `yicesBridge`, `dhallBridge`, `batchBridge`, `petersenMzv`) compile cleanly; `PerlBridgeSpec` 32/32 green including Perl subprocess integration.
++- v0.1.1.alpha.2: `postgres-bridge`'s `rows`/`class_file_hash` wiring fixed (previously non-compiling) and its first real Scala/Clojure JVM interop test added; SPARK's first domain-specific proof output; `dhall-bridge` Clojure/Alexander–Hodge work landed. See [Release Notes](../../releases/tag/v0.1.1.alpha.2) for the full list.
+ 
+ ## Future work
+ 
+@@ -430,6 +433,7 @@ shared StackInstr JSON, `Siunertaq::StackMachine.pm`, and full `PerlBridgeSpec`
+ - ClickHouse: additional materialised views for per-step latency distribution and cross-language divergence tracking (cases where `MISMATCH` was logged)
+ - `postgres-bridge`: wire `mzv_triple_log` PostgreSQL audit table directly into the Pekko supervision tree so every `ImaginaryPopperActor` regularization event is immutably recorded (ClickHouse CDC mirror `mzv_triple_stream` is complete; direct actor-tree wiring is pending)
+ - `postgres-bridge`: give `ClassASTBridge.compileFromClassFile` an actual caller — a directory watcher, a build-time hook, or a CLI entry point. The translation → ClickHouse ingestion path is fully wired end-to-end now (see Current status), but nothing in the source tree currently invokes it, so no bytecode compilation happens outside of `compilation_wiring_test.clj`'s own test fixtures
++- SPARK/Ada: prove the real theorem `Exec_Program` currently sidesteps — *any program produced by a well-typed lowering never violates `Exec_One`'s precondition* — rather than the placeholder `P'Length > 0`; this is the Ada-side equivalent of what `Lowering.lower`'s `ExprTyping.isWellTyped` guard already does dynamically on the Scala side
+ - `batchBridge` residual warnings: `ActorProtocol.scala` (`ActorRef` unused import), `JobSupervisorActor.scala` (`Terminated(_)` pattern variable), `MZVMachineBean.scala` (`unsafeRunSync`/`unsafeToFuture` → `using`), `PetersenSmtSolver.scala` (`Files.writeString` return discarded)
+ 
+ ## Contributing
+diff --git a/build.sbt b/build.sbt
+index e246886..3792fde 100644
+--- a/build.sbt
++++ b/build.sbt
+@@ -275,7 +275,14 @@ lazy val petersenMzv = (project in file("examples/petersen-mzv"))
+   )
+ 
+ lazy val postgresBridge = (project in file("modules/postgres-bridge"))
+-  .dependsOn(core, batchBridge, petersenMzv)
++  // dhallBridge added explicitly for PostgresBridgeApp/PostgresBridgeJobDef
++  // (reuses DhallBatchRegistry.evalDhall, the dhall-to-json subprocess
++  // bridge, rather than duplicating it). Note this was already reachable
++  // transitively via batchBridge.dependsOn(core, dhallBridge) -- this
++  // line doesn't newly enable compilation, it makes an already-used
++  // dependency explicit rather than incidental, so it doesn't silently
++  // break if batchBridge's own dependency graph ever changes.
++  .dependsOn(core, batchBridge, petersenMzv, dhallBridge)
+   .settings(
+     name := "Siunertaq-postgres",
+     scalacOptions ++= commonScalacOptions,
+diff --git a/docker/Dockerfile.batch-bridge b/docker/Dockerfile.batch-bridge
+new file mode 100644
+index 0000000..9396106
+--- /dev/null
++++ b/docker/Dockerfile.batch-bridge
+@@ -0,0 +1,131 @@
++# syntax=docker/dockerfile:1
++#
++# docker/Dockerfile.batch-bridge
++#
++# Runs io.siunertaq.batch.SiunertaqBatchApp: loads a BatchJob.dhall-defined
++# job and executes it as Spring Batch steps (StackMachineTasklet) under
++# Pekko supervision (JobSupervisorActor). No HTTP server anywhere in this
++# module -- this is a one-shot batch process, meant for a k8s Job/CronJob,
++# not a Deployment+Service.
++#
++# Packaging: NOT a fat jar. Pekko's config loading merges reference.conf
++# from every jar on the classpath at class-load time; sbt-assembly-style
++# fat jars need a MergeStrategy.concat rule for that specific file or
++# Pekko silently loses config from whichever jar's reference.conf lost the
++# merge collision. Keeping every dependency as its own jar on the
++# classpath (stage 1 packages each into /out/lib, stage 2 runs with
++# `-cp /app/lib/*`) sidesteps that entirely -- no merge step to get wrong.
++#
++# Classpath discovery: `sbt export .../Runtime/fullClasspath` asks sbt
++# directly for the real, resolved classpath instead of guessing where
++# compiled classes end up -- the same technique (and the same reason:
++# guessing that path wrong cost several iterations) as
++# .github/workflows/clojure_ci.yml's postgres-bridge job. See that
++# workflow's inline history comments if this ever needs revisiting.
++
++# ── Stage 1: build ───────────────────────────────────────────────────────────
++FROM eclipse-temurin:17-jdk-jammy AS build
++
++# sbt via its official apt repo. The `sbt` binary itself only needs to be
++# *a* working launcher -- it bootstraps the exact version pinned in
++# project/build.properties (1.12.11) on first invocation, the same way
++# GitHub Actions' sbt/setup-sbt does. Pinning the apt package version here
++# would be redundant and another thing to keep in sync for no benefit.
++RUN apt-get update && apt-get install -y --no-install-recommends \
++      curl gnupg ca-certificates \
++    && echo "deb https://repo.scala-sbt.org/scalasbt/debian all main" \
++         | tee /etc/apt/sources.list.d/sbt.list \
++    && curl -sL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823" \
++         | gpg --dearmor | tee /etc/apt/trusted.gpg.d/sbt.gpg > /dev/null \
++    && apt-get update && apt-get install -y --no-install-recommends sbt \
++    && rm -rf /var/lib/apt/lists/*
++
++WORKDIR /src
++
++# Only the three modules this image needs (build.sbt's other lazy vals --
++# z3-bridge, yices-bridge, postgres-bridge, petersen-mzv -- are untouched
++# source on disk here, but sbt only resolves/compiles what batchBridge
++# actually depends on: core and dhallBridge).
++COPY project project
++COPY build.sbt .
++COPY modules/core modules/core
++COPY modules/dhall-bridge modules/dhall-bridge
++COPY modules/batch-bridge modules/batch-bridge
++
++RUN sbt batchBridge/compile
++
++# Longest-line extraction, not last-line: confirmed in clojure_ci.yml's
++# own history that sbt can still emit a stray trailing line (an ANSI
++# remnant, "[0J") even with supershell disabled, and the classpath --
++# dozens of colon-separated jar paths -- is always far longer than any
++# such line. sed strips any escape codes that survive onto the line
++# itself as a second line of defense.
++RUN sbt -Dsbt.supershell=false --error \
++      'export batchBridge/Runtime/fullClasspath' \
++      | awk '{ if (length($0) > length(longest)) longest = $0 } END { print longest }' \
++      | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' \
++      > /tmp/classpath.txt \
++    && test -s /tmp/classpath.txt \
++    && grep -q "batch-bridge" /tmp/classpath.txt
++
++# Every classpath entry becomes a jar under /out/lib: dependency jars are
++# copied as-is, and each module's own compiled-classes *directory* (not a
++# jar -- sbt's own build output) gets zipped with the JDK's own `jar`
++# tool. This keeps every entry in /out/lib uniformly a .jar file, which
++# matters because the JVM's `-cp dir/*` wildcard (used in stage 2) only
++# expands to *.jar in that directory -- it does not pick up subdirectories,
++# so leaving compiled-classes directories un-jarred here would silently
++# drop this module's own code from the runtime classpath.
++RUN mkdir -p /out/lib && i=0 && \
++    tr ':' '\n' < /tmp/classpath.txt | while read -r entry; do \
++      if [ -d "$entry" ]; then \
++        i=$((i + 1)); \
++        jar --create --file "/out/lib/local-$i.jar" -C "$entry" . ; \
++      else \
++        cp "$entry" /out/lib/ ; \
++      fi \
++    done
++
++# ── Stage 2: runtime ─────────────────────────────────────────────────────────
++FROM eclipse-temurin:17-jre-jammy
++
++# StackMachine.pm ships as a classpath resource inside batch-bridge's own
++# compiled classes (extracted to a temp file at runtime -- see
++# PerlBridge.scala's "classpath resource" section) -- only the `perl`
++# interpreter itself needs to be on PATH, no separate module install.
++# PerlBridge.maybeCheckIO is gated on RUN_PERL_CROSSCHECK=1 (unset by
++# default), so having perl installed here doesn't make every run pay for
++# a Perl subprocess -- it makes the crosscheck available when a Job
++# explicitly opts in via env var.
++#
++# dhall-to-json: SiunertaqBatchApp calls DhallBatchRegistry.
++# loadBatchJobFromFile -> evalDhall at runtime, which shells out to this
++# binary, exactly the same as PostgresBridgeApp (Dockerfile.postgres-
++# bridge) -- this was missing from an earlier version of this Dockerfile
++# (caught while writing podci.yml's smoke test, not by running this
++# image, so treat it as unverified until that workflow actually goes
++# green).
++# Install bzip2 along with perl and curl to support tar -xj extraction
++RUN apt-get update && apt-get install -y --no-install-recommends \
++      perl \
++      curl \
++      bzip2 \
++    && curl -sSL https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-json-1.7.11-x86_64-Linux.tar.bz2 \
++       | tar -xj -C /usr/local/bin --strip-components=1 bin/dhall-to-json \
++    && apt-get purge -y curl && apt-get autoremove -y \
++    && rm -rf /var/lib/apt/lists/* \
++    && useradd --system --create-home --home-dir /app siunertaq
++
++WORKDIR /app
++COPY --from=build /out/lib /app/lib
++USER siunertaq
++
++# BATCH_JOB_DHALL: SiunertaqBatchApp.scala reads this env var for which
++# Dhall file to load via a plain filesystem Paths.get (not a classpath-
++# resource lookup) -- its default
++# ("modules/dhall-bridge/src/main/resources/BatchJob.dhall") is a
++# repo-root-relative path that doesn't exist in this flattened runtime
++# image, so BATCH_JOB_DHALL must always be set explicitly here (there is
++# no working fallback). Point it at a ConfigMap-mounted file -- see
++# k8s/configmap-batch-job.yaml and k8s/job-batch-bridge.yaml.
++ENTRYPOINT ["java", "-cp", "/app/lib/*", "io.siunertaq.batch.SiunertaqBatchApp"]
+\ No newline at end of file
+diff --git a/docker/Dockerfile.postgres-bridge b/docker/Dockerfile.postgres-bridge
+new file mode 100644
+index 0000000..95fe07c
+--- /dev/null
++++ b/docker/Dockerfile.postgres-bridge
+@@ -0,0 +1,113 @@
++# syntax=docker/dockerfile:1
++#
++# docker/Dockerfile.postgres-bridge
++#
++# Runs io.siunertaq.postgres.PostgresBridgeApp: loads a PostgresBridgeJob.
++# dhall-defined list of .class files, compiles each via ClassASTBridge
++# (ASM), and pushes the result to ClickHouseSyncActor. Also a one-shot
++# batch process (no HTTP server) -- k8s Job/CronJob, not a Deployment.
++#
++# PREREQUISITE: PostgresBridgeApp.scala / CompileClassTasklet.scala /
++# PostgresBridgeJobDef.scala / PostgresBridgeJob.dhall must actually be on
++# the branch this builds from. As of this Dockerfile being written, they
++# exist on hotfix/example/rows-wordBuf_clojure-test but not yet on main --
++# this build will fail with "class not found: io.siunertaq.postgres.
++# PostgresBridgeApp" until that's merged.
++#
++# Packaging rationale, sbt-export-based classpath discovery, and the
++# "why jar every local classes dir" reasoning are identical to
++# Dockerfile.batch-bridge -- see that file's header, not repeated here.
++
++# ── Stage 1: build ───────────────────────────────────────────────────────────
++FROM eclipse-temurin:17-jdk-jammy AS build
++
++RUN apt-get update && apt-get install -y --no-install-recommends \
++      curl gnupg ca-certificates \
++    && echo "deb https://repo.scala-sbt.org/scalasbt/debian all main" \
++         | tee /etc/apt/sources.list.d/sbt.list \
++    && curl -sL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823" \
++         | gpg --dearmor | tee /etc/apt/trusted.gpg.d/sbt.gpg > /dev/null \
++    && apt-get update && apt-get install -y --no-install-recommends sbt \
++    && rm -rf /var/lib/apt/lists/*
++
++WORKDIR /src
++
++# postgresBridge.dependsOn(core, batchBridge, petersenMzv, dhallBridge)
++# (build.sbt) -- petersenMzv is a real compile-time dependency (see
++# PetersenVertexBSD.scala's use of io.siunertaq.batch.CondExpr/CondOp)
++# even though this image never runs anything petersen-mzv-specific, so
++# its source has to be present for `postgresBridge/compile` to succeed.
++COPY project project
++COPY build.sbt .
++COPY modules/core modules/core
++COPY modules/dhall-bridge modules/dhall-bridge
++COPY modules/batch-bridge modules/batch-bridge
++COPY examples/petersen-mzv examples/petersen-mzv
++COPY modules/postgres-bridge modules/postgres-bridge
++
++RUN sbt postgresBridge/compile
++
++RUN sbt -Dsbt.supershell=false --error \
++      'export postgresBridge/Runtime/fullClasspath' \
++      | awk '{ if (length($0) > length(longest)) longest = $0 } END { print longest }' \
++      | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' \
++      > /tmp/classpath.txt \
++    && test -s /tmp/classpath.txt \
++    && grep -q "postgres-bridge" /tmp/classpath.txt
++
++RUN mkdir -p /out/lib && i=0 && \
++    tr ':' '\n' < /tmp/classpath.txt | while read -r entry; do \
++      if [ -d "$entry" ]; then \
++        i=$((i + 1)); \
++        jar --create --file "/out/lib/local-$i.jar" -C "$entry" . ; \
++      else \
++        cp "$entry" /out/lib/ ; \
++      fi \
++    done
++
++# ── Stage 2: runtime ─────────────────────────────────────────────────────────
++FROM eclipse-temurin:17-jre-jammy
++
++# dhall-to-json: PostgresBridgeApp reads PostgresBridgeJob.dhall via
++# DhallBatchRegistry.evalDhall, which shells out to this binary -- same
++# release clojure_ci.yml's "Install Dhall CLI" step already installs, for
++# the same reason (this is the exact production code path that step's
++# test, postgres_bridge_job_test.clj, validates in CI).
++#
++# perl: transitively available because postgresBridge depends on
++# batchBridge, whose StackMachineTasklet can invoke PerlBridge.
++# PostgresBridgeApp itself only ever builds CompileClassTasklet, not
++# StackMachineTasklet, so a normal run of *this* app never touches Perl --
++# it's here so the same image could also run a BatchJob.dhall-style job
++# (io.siunertaq.batch.SiunertaqBatchApp is on this image's classpath too,
++# transitively) without a rebuild, not because PostgresBridgeApp needs it
++# for its own sake.
++# Install bzip2 alongside perl and curl for archive extraction
++RUN apt-get update && apt-get install -y --no-install-recommends \
++      perl \
++      curl \
++      bzip2 \
++    && curl -sSL https://github.com/dhall-lang/dhall-haskell/releases/download/1.41.2/dhall-json-1.7.11-x86_64-Linux.tar.bz2 \
++       | tar -xj -C /usr/local/bin --strip-components=1 bin/dhall-to-json \
++    && apt-get purge -y curl && apt-get autoremove -y \
++    && rm -rf /var/lib/apt/lists/* \
++    && useradd --system --create-home --home-dir /app siunertaq
++
++WORKDIR /app
++COPY --from=build /out/lib /app/lib
++USER siunertaq
++
++# POSTGRES_BRIDGE_JOB_DHALL: same situation as SiunertaqBatchApp's
++# BATCH_JOB_DHALL (Dockerfile.batch-bridge) -- the default
++# ("modules/postgres-bridge/src/main/resources/PostgresBridgeJob.dhall")
++# is a repo-root-relative filesystem path that doesn't exist in this
++# image, so this must always be set explicitly. See
++# k8s/configmap-postgres-bridge-job.yaml and
++# k8s/cronjob-postgres-bridge.yaml.
++#
++# CLICKHOUSE_HOST / CLICKHOUSE_PORT / CLICKHOUSE_DB / CLICKHOUSE_USER /
++# CLICKHOUSE_PASS: read by ClickHouseConfig.fromEnv (ClickHouseSync.scala)
++# -- all optional, default to localhost:8123/siunertaq/default/<empty>,
++# which will not reach a real ClickHouse from inside a Pod. Set at least
++# CLICKHOUSE_HOST in production.
++ENTRYPOINT ["java", "-cp", "/app/lib/*", "io.siunertaq.postgres.PostgresBridgeApp"]
+\ No newline at end of file
+diff --git a/k8s/cronjob-postgres-bridge.yaml b/k8s/cronjob-postgres-bridge.yaml
+new file mode 100644
+index 0000000..3bf5f13
+--- /dev/null
++++ b/k8s/cronjob-postgres-bridge.yaml
+@@ -0,0 +1,79 @@
++# k8s/cronjob-postgres-bridge.yaml
++#
++# Recurring run of io.siunertaq.postgres.PostgresBridgeApp against a
++# PostgresBridgeJob.dhall ConfigMap -- CronJob rather than a one-shot Job
++# on the assumption that "compile whatever .class files are declared"
++# is meant to happen on a schedule (e.g. picking up newly-built classes)
++# rather than exactly once. If that assumption is wrong and this is
++# meant to run once per deploy instead, use job-batch-bridge.yaml's Job
++# shape (spec.jobTemplate.spec below is identical either way).
++#
++# Before applying:
++#   kubectl create configmap postgres-bridge-job-dhall -n siunertaq \
++#     --from-file=PostgresBridgeJob.dhall=modules/postgres-bridge/src/main/resources/PostgresBridgeJob.dhall
++#   kubectl apply -f secret.example.yaml   # filled in, not the template
++#   kubectl apply -f cronjob-postgres-bridge.yaml
++#
++# PostgresBridgeJob.dhall's own example target
++# (io/siunertaq/postgres/example/Sample.class) is a placeholder path from
++# this module's src/main/resources -- replace it with whatever real
++# .class file(s) this deployment should actually compile before this
++# does anything useful. The ConfigMap above ships whatever's in the
++# Dhall file verbatim; class_file_path entries in it need to resolve to
++# real paths *inside this container* (this image's /app/lib/*.jar don't
++# expose individual .class files on the filesystem for
++# compileFromClassFile to read directly -- see the "Known gaps" section
++# of KUBERNETES.md for why that's flagged as still open, not silently
++# assumed to work).
++apiVersion: batch/v1
++kind: CronJob
++metadata:
++  name: siunertaq-postgres-bridge
++  namespace: siunertaq
++spec:
++  # Placeholder -- every 15 minutes. Adjust to the real desired cadence.
++  schedule: "*/15 * * * *"
++  concurrencyPolicy: Forbid
++  successfulJobsHistoryLimit: 3
++  failedJobsHistoryLimit: 3
++  jobTemplate:
++    spec:
++      backoffLimit: 2
++      ttlSecondsAfterFinished: 3600
++      template:
++        spec:
++          restartPolicy: Never
++          containers:
++            - name: postgres-bridge
++              image: siunertaq/postgres-bridge:latest   # built from docker/Dockerfile.postgres-bridge
++              env:
++                - name: POSTGRES_BRIDGE_JOB_DHALL
++                  value: /config/PostgresBridgeJob.dhall
++                - name: CLICKHOUSE_HOST
++                  value: clickhouse.siunertaq.svc.cluster.local
++                - name: CLICKHOUSE_PORT
++                  value: "8123"
++                - name: CLICKHOUSE_DB
++                  value: siunertaq
++                - name: CLICKHOUSE_USER
++                  value: default
++                - name: CLICKHOUSE_PASS
++                  valueFrom:
++                    secretKeyRef:
++                      name: siunertaq-db-credentials
++                      key: CLICKHOUSE_PASS
++              volumeMounts:
++                - name: postgres-bridge-job-dhall
++                  mountPath: /config
++                  readOnly: true
++              resources:
++                requests:
++                  cpu: 250m
++                  memory: 256Mi
++                limits:
++                  cpu: "1"
++                  memory: 1Gi
++          volumes:
++            - name: postgres-bridge-job-dhall
++              configMap:
++                name: postgres-bridge-job-dhall
+\ No newline at end of file
+diff --git a/k8s/job-batch-bridge.yaml b/k8s/job-batch-bridge.yaml
+new file mode 100644
+index 0000000..45aaed6
+--- /dev/null
++++ b/k8s/job-batch-bridge.yaml
+@@ -0,0 +1,54 @@
++# k8s/job-batch-bridge.yaml
++#
++# One-shot run of io.siunertaq.batch.SiunertaqBatchApp against a
++# BatchJob.dhall ConfigMap. Not a CronJob: batch-bridge's own jobs
++# (Alexander-Hodge traversal etc.) read as one-off runs from everything
++# seen of this module so far -- adjust to CronJob (see
++# cronjob-postgres-bridge.yaml for the shape) if a recurring schedule
++# turns out to be wanted instead.
++#
++# Before applying:
++#   kubectl create configmap batch-job-dhall -n siunertaq \
++#     --from-file=BatchJob.dhall=modules/dhall-bridge/src/main/resources/BatchJob.dhall
++#   kubectl apply -f secret.example.yaml   # filled in, not the template
++#   kubectl apply -f job-batch-bridge.yaml
++#
++# RUN_PERL_CROSSCHECK=1 is commented out below rather than set: leaving
++# it unset (PerlBridge.maybeCheckIO's own default) means every step runs
++# without the Perl subprocess at all. Uncomment to opt a specific run
++# into the crosscheck -- see PerlBridge.scala's gating logic for exactly
++# what changes when this is set.
++apiVersion: batch/v1
++kind: Job
++metadata:
++  name: siunertaq-batch-bridge
++  namespace: siunertaq
++spec:
++  backoffLimit: 2
++  ttlSecondsAfterFinished: 3600
++  template:
++    spec:
++      restartPolicy: Never
++      containers:
++        - name: batch-bridge
++          image: siunertaq/batch-bridge:latest   # built from docker/Dockerfile.batch-bridge
++          env:
++            - name: BATCH_JOB_DHALL
++              value: /config/BatchJob.dhall
++            # - name: RUN_PERL_CROSSCHECK
++            #   value: "1"
++          volumeMounts:
++            - name: batch-job-dhall
++              mountPath: /config
++              readOnly: true
++          resources:
++            requests:
++              cpu: 250m
++              memory: 256Mi
++            limits:
++              cpu: "1"
++              memory: 1Gi
++      volumes:
++        - name: batch-job-dhall
++          configMap:
++            name: batch-job-dhall
+\ No newline at end of file
+diff --git a/k8s/secret.example.yaml b/k8s/secret.example.yaml
+new file mode 100644
+index 0000000..2226aa7
+--- /dev/null
++++ b/k8s/secret.example.yaml
+@@ -0,0 +1,22 @@
++# k8s/secret.example.yaml
++#
++# Template only -- do not commit real credentials. Copy this, fill in
++# real values, and apply the copy (or generate it with
++# `kubectl create secret generic ... --from-literal=...` instead of
++# checking a filled-in copy into git at all).
++#
++# Keys match exactly what ClickHouseConfig.fromEnv (ClickHouseSync.scala)
++# and the Postgres connection config (ForthConnMachine.scala) read --
++# CLICKHOUSE_PASS / POSTGRES_PASS are the only two that are actually
++# secret; host/port/db/user are non-secret and set directly as plain env
++# vars on the Job/CronJob (see job-batch-bridge.yaml /
++# cronjob-postgres-bridge.yaml), not via this Secret.
++apiVersion: v1
++kind: Secret
++metadata:
++  name: siunertaq-db-credentials
++  namespace: siunertaq
++type: Opaque
++stringData:
++  CLICKHOUSE_PASS: "REPLACE_ME"
++  POSTGRES_PASS: "REPLACE_ME"
+\ No newline at end of file
+diff --git a/modules/postgres-bridge/src/main/resources/PostgresBridgeJob.dhall b/modules/postgres-bridge/src/main/resources/PostgresBridgeJob.dhall
+new file mode 100644
+index 0000000..8085b8d
+--- /dev/null
++++ b/modules/postgres-bridge/src/main/resources/PostgresBridgeJob.dhall
+@@ -0,0 +1,52 @@
++{-|  PostgresBridgeJob.dhall
++     modules/postgres-bridge/src/main/resources/PostgresBridgeJob.dhall
++
++     Declares which .class files ClassASTBridge.compileFromClassFile should
++     compile and push to ClickHouseSyncActor -- the same role BatchJob.dhall
++     (modules/dhall-bridge) plays for the BSD Quiver stack machine's steps,
++     loaded the same way (DhallBatchRegistry.evalDhall shells out to
++     dhall-to-json; PostgresBridgeJobDef.scala's circe Decoder does the
++     rest). Deliberately a separate file/type from BatchJob.dhall/StepDef:
++     StepDef.input_prog is typed to the stack machine's Program, which a
++     .class file's path isn't -- see PostgresBridgeApp.scala's header for
++     why this doesn't reuse JobSupervisorActor/StepExecutorActor either.
++
++     No union types here (unlike BatchJob.dhall's StackInstr/CondExpr),
++     so this doesn't need BatchJob.dhall's Prelude.JSON workaround for
++     empty-payload alternatives colliding under dhall-to-json's default
++     encoding -- a plain record list serializes cleanly on its own.
++
++     Usage:
++       dhall-to-json --file PostgresBridgeJob.dhall
++       # or: POSTGRES_BRIDGE_JOB_DHALL=/path/to/this.dhall sbt "postgresBridge/runMain io.siunertaq.postgres.PostgresBridgeApp"
++-}
++
++let ClassTarget =
++      { class_file_path  : Text
++      , target_method    : Text
++      , target_descriptor : Optional Text
++      , allow_stubs      : Bool
++      }
++
++let mkTarget
++    : Text -> Text -> ClassTarget
++    = \(path : Text) ->
++      \(method : Text) ->
++        { class_file_path = path
++        , target_method = method
++        , target_descriptor = None Text
++        , allow_stubs = False
++        }
++
++-- Example targets. Replace with the real .class file(s) to compile, or
++-- point POSTGRES_BRIDGE_JOB_DHALL at a different file entirely for a
++-- different environment (dev / CI / prod) without touching Scala code,
++-- the same way BATCH_JOB_DHALL works for SiunertaqBatchApp.
++let targets =
++      [ mkTarget
++          "modules/postgres-bridge/target/scala-3.8.3/classes/io/siunertaq/postgres/example/Sample.class"
++          "execute"
++      ]
++
++in    { job_name = "postgres-bridge-compile", targets }
++    : { job_name : Text, targets : List ClassTarget }
+diff --git a/modules/postgres-bridge/src/main/scala/io/siunertaq/postgres/CompileClassTasklet.scala b/modules/postgres-bridge/src/main/scala/io/siunertaq/postgres/CompileClassTasklet.scala
+new file mode 100644
+index 0000000..7ec9592
+--- /dev/null
++++ b/modules/postgres-bridge/src/main/scala/io/siunertaq/postgres/CompileClassTasklet.scala
+@@ -0,0 +1,76 @@
++package io.siunertaq.postgres
++
++import cats.effect.unsafe.IORuntime
++import org.apache.pekko.actor.ActorRef
++import org.springframework.batch.core.{ExitStatus, StepContribution}
++import org.springframework.batch.core.scope.context.ChunkContext
++import org.springframework.batch.core.step.tasklet.Tasklet
++import org.springframework.batch.repeat.RepeatStatus
++
++import java.nio.file.Paths
++
++// ─── CompileClassTasklet ─────────────────────────────────────────────────────
++//
++//  Gives ClassASTBridge.compileFromClassFile a Spring Batch Tasklet, the
++//  same role StackMachineTasklet (modules/batch-bridge) plays for the BSD
++//  Quiver stack machine -- same shape (execute/StepContribution/
++//  ChunkContext/RepeatStatus.FINISHED, results written to the step's
++//  JobExecutionContext, ExitStatus.FAILED with addExitDescription on
++//  error) so a step's outcome is visible the same way regardless of which
++//  Tasklet ran it.
++//
++//  Unlike StackMachineTasklet, compileFromClassFile returns IO[Unit], not
++//  an Either -- .attempt converts a raised UnsupportedBytecodeException /
++//  OverloadedMethodException / MethodNotFoundException /
++//  IncompleteTranslationException (or a plain file-read IOException) into
++//  a value this Tasklet can report through ExitStatus.FAILED, rather than
++//  letting it propagate as an uncaught exception out of execute().
++//
++//  Thread safety: IO execution is done via IORuntime.global by default,
++//  same as StackMachineTasklet. step.execute() (Spring Batch) is blocking
++//  either way.
++
++final class CompileClassTasklet(
++  target:         ClassCompilationTarget,
++  clickHouseSync: ActorRef,
++  ioRuntime:      IORuntime = IORuntime.global
++) extends Tasklet:
++
++  override def execute(
++    contribution: StepContribution,
++    chunkContext: ChunkContext
++  ): RepeatStatus =
++
++    val execCtx = chunkContext
++      .getStepContext
++      .getStepExecution
++      .getJobExecution
++      .getExecutionContext
++
++    val stepName = target.classFilePath
++
++    val outcome =
++      ClassASTBridge
++        .compileFromClassFile(
++          Paths.get(target.classFilePath),
++          clickHouseSync,
++          target.targetMethod,
++          target.targetDescriptor,
++          target.allowStubs
++        )
++        .attempt
++        .unsafeRunSync()(using ioRuntime)
++
++    outcome match
++      case Right(()) =>
++        execCtx.put(s"$stepName.result", "COMPILED")
++        contribution.setExitStatus(ExitStatus.COMPLETED)
++
++      case Left(error) =>
++        val msg = Option(error.getMessage).getOrElse(error.getClass.getSimpleName)
++        execCtx.put(s"$stepName.error", msg)
++        contribution.setExitStatus(
++          ExitStatus.FAILED.addExitDescription(msg)
++        )
++
++    RepeatStatus.FINISHED
+\ No newline at end of file
+diff --git a/modules/postgres-bridge/src/main/scala/io/siunertaq/postgres/PostgresBridgeApp.scala b/modules/postgres-bridge/src/main/scala/io/siunertaq/postgres/PostgresBridgeApp.scala
+new file mode 100644
+index 0000000..b775881
+--- /dev/null
++++ b/modules/postgres-bridge/src/main/scala/io/siunertaq/postgres/PostgresBridgeApp.scala
+@@ -0,0 +1,107 @@
++package io.siunertaq.postgres
++
++import cats.effect.{IO, IOApp}
++import cats.effect.unsafe.IORuntime
++import io.siunertaq.batch.DhallBatchRegistry
++import org.apache.pekko.actor.ActorSystem
++import org.springframework.batch.core.JobParameters
++import org.springframework.batch.core.repository.support.JobRepositoryFactoryBean
++import org.springframework.batch.core.repository.JobRepository
++import org.springframework.batch.core.step.builder.StepBuilder
++import org.springframework.jdbc.datasource.embedded.{EmbeddedDatabaseBuilder, EmbeddedDatabaseType}
++import org.springframework.jdbc.datasource.DataSourceTransactionManager
++import org.springframework.transaction.PlatformTransactionManager
++
++import java.nio.file.{Files, Paths}
++
++// ─── PostgresBridgeApp ───────────────────────────────────────────────────────
++//
++//  compileClass / compileFromClassFile / PushCompilation (ClassASTBridge)
++//  had no caller anywhere in the source tree -- the rows/class_file_hash
++//  wiring into ClickHouseSyncActor was correct but nothing ever triggered
++//  it. This is that caller: loads PostgresBridgeJob.dhall (this module's
++//  src/main/resources), and for each declared target runs
++//  CompileClassTasklet through a Spring Batch step, mirroring
++//  SiunertaqBatchApp's (modules/batch-bridge) Dhall-config -> Tasklet
++//  bootstrap shape directly.
++//
++//  Deliberately does NOT go through JobSupervisorActor/StepExecutorActor
++//  (modules/batch-bridge): StepExecutorActor.runSpringBatchStep hard-codes
++//  StackMachineTasklet(stepDef.inputProg, ...) for every step, and
++//  StepDef.inputProg is typed to the BSD Quiver stack machine's Program --
++//  neither fits "compile this .class file" without either widening StepDef
++//  with a discriminator (touches shared, tested code StackMachineTasklet's
++//  existing callers already depend on) or forcing a compilation request
++//  through Program/StackInstr's JSON shape, which it isn't. This costs the
++//  JobSupervisorActor's COND-based step-skip logic and its Pekko
++//  OneForOneStrategy ABEND handling between steps -- not missed yet, since
++//  each target here is independent (compiling one .class file doesn't
++//  depend on a previous target's result the way BatchJob.dhall's COND
++//  steps can). If that stops being true, giving StepDef a discriminator
++//  and folding this into JobSupervisorActor properly becomes worth the
++//  shared-code risk; until then this stays a parallel, smaller path.
++//
++//  ClickHouseSyncActor itself still owns its own retry/supervision
++//  (OneForOneStrategy, restart on IOException) independently of Spring
++//  Batch's ExitStatus for this step -- a step reporting COMPLETED means
++//  compileFromClassFile's IO succeeded and PushCompilation was sent, not
++//  that ClickHouse itself has necessarily ingested it yet.
++object PostgresBridgeApp extends IOApp.Simple:
++
++  private def buildInfra: (JobRepository, PlatformTransactionManager) =
++    val ds = EmbeddedDatabaseBuilder()
++      .setType(EmbeddedDatabaseType.H2)
++      .addScript("classpath:org/springframework/batch/core/schema-h2.sql")
++      .build()
++    val txMgr = DataSourceTransactionManager(ds)
++    val factory = JobRepositoryFactoryBean()
++    factory.setDataSource(ds)
++    factory.setTransactionManager(txMgr)
++    factory.afterPropertiesSet()
++    (factory.getObject, txMgr)
++
++  override def run: IO[Unit] =
++    IO(ActorSystem("postgres-bridge"))
++      .bracket(runJob)(sys => IO.fromFuture(IO(sys.terminate())).void)
++
++  private def runJob(system: ActorSystem): IO[Unit] =
++    val ioRuntime = IORuntime.global
++
++    for
++      dhallPath <- IO(Paths.get(
++        sys.env.getOrElse(
++          "POSTGRES_BRIDGE_JOB_DHALL",
++          "modules/postgres-bridge/src/main/resources/PostgresBridgeJob.dhall"
++        )
++      ))
++      dhallExpr <- IO.blocking(Files.readString(dhallPath))
++      json      <- DhallBatchRegistry.evalDhall(dhallExpr)
++      jobDef    <- IO(PostgresBridgeJobDef.decodeJson(json))
++
++      clickHouseSync = system.actorOf(
++        ClickHouseSyncActor.props(ClickHouseConfig().fromEnv, ioRuntime),
++        name = "clickhouse-sync"
++      )
++
++      (jobRepository, txMgr) = buildInfra
++
++      // Sequential, blocking, same as StepExecutorActor.runSpringBatchStep --
++      // step.execute() is a blocking Spring Batch call either way, and
++      // these targets don't depend on each other's outcome (see header).
++      results <- IO.blocking {
++        jobDef.targets.map { target =>
++          val tasklet  = CompileClassTasklet(target, clickHouseSync, ioRuntime)
++          val step     = StepBuilder(target.classFilePath, jobRepository)
++                           .tasklet(tasklet, txMgr)
++                           .build()
++          val jobExec  = jobRepository.createJobExecution(jobDef.jobName, JobParameters())
++          val stepExec = jobExec.createStepExecution(target.classFilePath)
++          jobRepository.add(stepExec)
++          step.execute(stepExec)
++          (target.classFilePath, stepExec.getExitStatus.getExitCode)
++        }
++      }
++
++      _ <- IO.println(s"=== ${jobDef.jobName}: ${results.size} target(s) ===")
++      _ <- IO.blocking(results.foreach { case (path, status) => println(s"  $path -> $status") })
++    yield ()
+\ No newline at end of file
+diff --git a/modules/postgres-bridge/src/main/scala/io/siunertaq/postgres/PostgresBridgeJobDef.scala b/modules/postgres-bridge/src/main/scala/io/siunertaq/postgres/PostgresBridgeJobDef.scala
+new file mode 100644
+index 0000000..dcc971f
+--- /dev/null
++++ b/modules/postgres-bridge/src/main/scala/io/siunertaq/postgres/PostgresBridgeJobDef.scala
+@@ -0,0 +1,61 @@
++package io.siunertaq.postgres
++
++import io.circe.Decoder
++
++// ─── PostgresBridgeJobDef ───────────────────────────────────────────────────
++//
++//  Scala counterpart of PostgresBridgeJob.dhall (this module's
++//  src/main/resources), loaded the same way BatchJobDef is loaded from
++//  BatchJob.dhall: DhallBatchRegistry.evalDhall (modules/dhall-bridge)
++//  shells out to dhall-to-json, and the circe Decoder below does the rest.
++//
++//  Deliberately NOT StepDef/BatchJobDef (modules/dhall-bridge): those are
++//  typed to the BSD Quiver stack machine's Program (StepDef.inputProg), not
++//  to compiling a .class file, and StepExecutorActor.runSpringBatchStep
++//  hard-codes StackMachineTasklet for every step regardless of type -- see
++//  PostgresBridgeApp.scala's header comment for the full reasoning on why
++//  this stays a parallel, independently-typed path rather than widening
++//  StepDef with a discriminator.
++
++final case class ClassCompilationTarget(
++  classFilePath:    String,
++  targetMethod:     String,
++  targetDescriptor: Option[String],
++  allowStubs:       Boolean
++) derives CanEqual
++
++object ClassCompilationTarget:
++  given Decoder[ClassCompilationTarget] = Decoder.instance { c =>
++    for
++      path       <- c.downField("class_file_path").as[String]
++      method     <- c.downField("target_method").as[String]
++      descriptor <- c.downField("target_descriptor").as[Option[String]]
++      allowStubs <- c.downField("allow_stubs").as[Boolean]
++    yield ClassCompilationTarget(path, method, descriptor, allowStubs)
++  }
++
++final case class PostgresBridgeJobDef(
++  jobName: String,
++  targets: List[ClassCompilationTarget]
++) derives CanEqual
++
++object PostgresBridgeJobDef:
++  given Decoder[PostgresBridgeJobDef] = Decoder.instance { c =>
++    for
++      jobName <- c.downField("job_name").as[String]
++      targets <- c.downField("targets").as[List[ClassCompilationTarget]]
++    yield PostgresBridgeJobDef(jobName, targets)
++  }
++
++  // Plain, ordinary-named wrapper around the circe Decoder above, throwing
++  // on failure. Exists because external JVM callers (postgres_bridge_
++  // job_test.clj, PostgresBridgeApp.scala) would otherwise need to know
++  // Scala 3's compiler-generated name for the anonymous `given` instance
++  // to invoke it directly -- a named `def` is a stable, ordinary JVM
++  // method regardless of how givens happen to compile internally, and
++  // gives both callers one shared decode-and-report-errors path instead
++  // of two copies of the same match/throw.
++  def decodeJson(json: String): PostgresBridgeJobDef =
++    io.circe.parser.decode[PostgresBridgeJobDef](json) match
++      case Right(v) => v
++      case Left(e)  => throw RuntimeException(s"PostgresBridgeJobDef decode failed: ${e.getMessage}")
+\ No newline at end of file
+diff --git a/modules/postgres-bridge/test/main/clojure/siunertaq/class_fixture.clj b/modules/postgres-bridge/test/main/clojure/siunertaq/class_fixture.clj
+new file mode 100644
+index 0000000..788f1a6
+--- /dev/null
++++ b/modules/postgres-bridge/test/main/clojure/siunertaq/class_fixture.clj
+@@ -0,0 +1,82 @@
++(ns siunertaq.class-fixture
++  "Generates real, loadable .class bytecode via ASM's ClassWriter --
++   physically, from Clojure, rather than mocking JVM classfile parsing
++   or reaching for a second JDK distribution (GraalVM) just to produce
++   one small .class file. org.ow2.asm:asm is already a dependency of
++   postgresBridge and already on this classpath (compilation-wiring-
++   test.clj's own :scala-classes / sbt-exported classpath includes it,
++   the same jar ClassASTBridge.scala uses to *read* .class files) -- the
++   writer half (ClassWriter) lives in that exact same jar, so this adds
++   no new dependency, no subprocess, no second JVM.
++
++   Why this matters beyond just having a fixture: nothing has ever
++   exercised ClassASTBridge's actual ASM ClassReader path (scanMethod /
++   extractFromBytes / compileClass) until now. compilation-wiring-
++   test.clj calls MecrispCompiler.compile directly with a hand-built
++   opcode sequence, which never touches ClassReader/ClassVisitor/
++   MethodVisitor at all. A real generated .class file closes that gap."
++  (:import [org.objectweb.asm ClassWriter Opcodes]))
++
++(def sample-class-internal-name
++  "ASM/JVM internal name (slash-separated), matching
++   PostgresBridgeJob.dhall's example target path convention."
++  "io/siunertaq/postgres/example/Sample")
++
++(defn generate-sample-class-bytes
++  "A minimal, real, loadable class: a public no-arg constructor, plus a
++   public execute() method with body BIPUSH 5, ICONST_2, IADD, IRETURN
++   (returns 7). Opcodes match compilation-wiring-test.clj's
++   sample-opcodes exactly (BIPUSH=16, ICONST_2=5, IADD=96) -- the point
++   is for the ASM-read path and the hand-fed-opcode path to agree on
++   the same instruction sequence, not to test a different one.
++
++   COMPUTE_MAXS | COMPUTE_FRAMES: ASM computes the stack-map table and
++   max stack/locals itself, so visitMaxs' explicit arguments below are
++   ignored placeholders -- still required to be called, per ASM's
++   MethodVisitor contract."
++  ^bytes []
++  (let [cw (ClassWriter. (bit-or ClassWriter/COMPUTE_MAXS ClassWriter/COMPUTE_FRAMES))]
++    (.visit cw Opcodes/V17
++            (bit-or Opcodes/ACC_PUBLIC Opcodes/ACC_SUPER)
++            sample-class-internal-name nil
++            "java/lang/Object" nil)
++
++    ;; public Sample() { super(); }
++    (let [ctor (.visitMethod cw Opcodes/ACC_PUBLIC "<init>" "()V" nil nil)]
++      (.visitCode ctor)
++      (.visitVarInsn ctor Opcodes/ALOAD 0)
++      (.visitMethodInsn ctor Opcodes/INVOKESPECIAL "java/lang/Object" "<init>" "()V" false)
++      (.visitInsn ctor Opcodes/RETURN)
++      (.visitMaxs ctor 0 0)
++      (.visitEnd ctor))
++
++    ;; public int execute() { return 5 + 2; }  (as BIPUSH/ICONST_2/IADD/IRETURN,
++    ;; not as a constant-folded ICONST_7, so ClassASTBridge sees 3 real
++    ;; instructions to translate rather than javac's likely-folded 1)
++    (let [mv (.visitMethod cw Opcodes/ACC_PUBLIC "execute" "()I" nil nil)]
++      (.visitCode mv)
++      (.visitIntInsn mv Opcodes/BIPUSH 5)
++      (.visitInsn mv Opcodes/ICONST_2)
++      (.visitInsn mv Opcodes/IADD)
++      (.visitInsn mv Opcodes/IRETURN)
++      (.visitMaxs mv 0 0)
++      (.visitEnd mv))
++
++    (.visitEnd cw)
++    (.toByteArray cw)))
++
++(defn write-sample-class-file!
++  "Writes generate-sample-class-bytes to disk at `path`, creating parent
++   directories as needed. Not used by compilation-wiring-test.clj itself
++   (that test feeds the bytes to ClassASTBridge/compileClass directly,
++   in memory -- compileClass takes Array[Byte], not a file path). This
++   exists for a future end-to-end smoke test of PostgresBridgeApp /
++   CompileClassTasklet, which goes through compileFromClassFile and
++   therefore does need a real file on disk -- PostgresBridgeJob.dhall's
++   example target already points at this exact path
++   (.../example/Sample.class), unwritten until something calls this."
++  [^String path]
++  (let [f (java.io.File. path)]
++    (some-> (.getParentFile f) .mkdirs)
++    (with-open [out (java.io.FileOutputStream. f)]
++      (.write out (generate-sample-class-bytes)))))
+\ No newline at end of file
+diff --git a/modules/postgres-bridge/test/main/clojure/siunertaq/compilation_wiring_test.clj b/modules/postgres-bridge/test/main/clojure/siunertaq/compilation_wiring_test.clj
+index 4cea9ef..12dc78e 100644
+--- a/modules/postgres-bridge/test/main/clojure/siunertaq/compilation_wiring_test.clj
++++ b/modules/postgres-bridge/test/main/clojure/siunertaq/compilation_wiring_test.clj
+@@ -1,6 +1,8 @@
+ (ns siunertaq.compilation-wiring-test
+-  (:require [clojure.test :refer [deftest is testing]])
+-  (:import [io.siunertaq.postgres MecrispCompiler]
++  (:require [clojure.test :refer [deftest is testing]]
++            [siunertaq.class-fixture :as fixture])
++  (:import [io.siunertaq.postgres ClassASTBridge MecrispCompiler]
++           [cats.effect.unsafe IORuntime IORuntime$]
+            [scala None$ Some Tuple2]
+            [scala.jdk.javaapi CollectionConverters]))
+ 
+@@ -15,12 +17,23 @@
+ ;; a test; this file exists so the same class of regression (an arity
+ ;; mismatch, or rows silently going empty again) fails loudly next time.
+ ;;
++;; Sections 1-3 call MecrispCompiler directly with a hand-fed opcode
++;; sequence -- they never touch ClassASTBridge's actual ASM ClassReader
++;; path (scanMethod/extractFromBytes/compileClass), which nothing else in
++;; this project's test suite exercises either. Section 4 closes that gap
++;; using a real ASM-generated .class file (siunertaq.class-fixture) built
++;; from the same jar ClassASTBridge itself reads with -- no GraalVM, no
++;; subprocess, no second JVM distribution for the sake of one test class.
++;;
+ ;; STATUS: unlike mecrisp-instr-test.clj (which transcribes stackDelta's
+ ;; match table into an independent Clojure model, since no Scala 3
+ ;; compiler was available in that file's original sandbox), this file
+-;; calls the real, compiled io.siunertaq.postgres.MecrispCompiler object
+-;; directly -- the "future" interop mecrisp-instr-test.clj's header
+-;; deferred.
++;; calls the real, compiled io.siunertaq.postgres classes directly -- the
++;; "future" interop mecrisp-instr-test.clj's header deferred. Section 4
++;; additionally touches cats-effect's IO/IORuntime for the first time in
++;; this project's Clojure tests (compileClass returns IO[CompilationResult],
++;; unlike MecrispCompiler.compile/toRows which are plain synchronous
++;; functions) -- see unsafe-run-sync below for that interop specifically.
+ ;;
+ ;; clojure_ci.yml runs `sbt postgresBridge/compile`, then
+ ;; `sbt export postgresBridge/Compile/fullClasspath` to get this
+@@ -33,12 +46,13 @@
+ ;; in deps.edn for what changed and why. This sandbox has neither sbt
+ ;; nor network access to Maven Central to run any of this and confirm
+ ;; the interop calls below actually work; they were written directly
+-;; against MecrispCompiler.scala's real current signatures (compile's 4
+-;; params, toRows' 2 params, translateOpcode's opcode table) rather than
+-;; assumed, but treat this file as unverified until it's actually run
+-;; once -- if it still fails, the next thing to check is the interop
+-;; calls themselves (e.g. Scala tuple specialization), not the
+-;; classpath setup.
++;; against the real current source (ClassASTBridge.compileClass's 4
++;; params and scanMethod's opcode-capture rules, MecrispCompiler.compile's
++;; 4 params, toRows' 2 params, translateOpcode's opcode table) rather
++;; than assumed, but treat this file as unverified until it's actually
++;; run once -- if it still fails, the next thing to check is the interop
++;; calls themselves (e.g. Scala tuple specialization, or IORuntime's
++;; class/companion-object split), not the classpath setup.
+ 
+ ;; ---- 1. Scala interop helpers -------------------------------------------
+ 
+@@ -63,9 +77,12 @@
+ 
+ (def sample-opcodes
+   "BIPUSH 5, ICONST_2, IADD -- raw JVM instruction-set opcode numbers
+-   (BIPUSH=16, ICONST_2=5, IADD=96; see the JVM spec's instruction table),
+-   used directly instead of ASM's Opcodes class so this test doesn't need
+-   ASM's jar on :scala-classes' deliberately minimal classpath.
++   (BIPUSH=16, ICONST_2=5, IADD=96; see the JVM spec's instruction table).
++   Used as literal numbers here (rather than ASM's Opcodes class) so
++   sections 1-3 stay an independent hand-fed baseline -- section 4 checks
++   that ASM, reading a real generated .class file, arrives at this exact
++   same sequence, which wouldn't be much of a check if both sides pulled
++   the numbers from the same Opcodes constants.
+    MecrispCompiler.scala's translateOpcode maps these to
+    Literal(5), Literal(2), Plus -- no Stub, no Exit -- so hasDeadCode is
+    false and word.body is exactly these 3 instructions, with no header/
+@@ -104,4 +121,58 @@
+     (let [word (compile-sample)
+           rows (CollectionConverters/asJava (MecrispCompiler/toRows word sample-hash))]
+       (is (seq rows))
+-      (is (every? #(= sample-hash (.classFileHash %)) rows)))))
+\ No newline at end of file
++      (is (every? #(= sample-hash (.classFileHash %)) rows)))))
++
++;; ---- 4. Real ASM-read path (ClassASTBridge.compileClass) ------------------
++;;
++;; Everything above calls MecrispCompiler directly with a hand-fed opcode
++;; sequence -- it never touches ClassASTBridge's actual ASM ClassReader
++;; path. class-fixture/generate-sample-class-bytes builds a real,
++;; loadable .class file whose execute() method is the exact same
++;; instruction sequence as sample-opcodes above, so these tests and
++;; to-rows-length-matches-word-body-test / to-rows-threads-class-file-
++;; hash-through-every-row-test are checking the same 3-instruction shape
++;; via two independent paths -- one hand-fed, one read by ASM off real
++;; bytecode -- rather than trusting either path alone.
++
++(defn- unsafe-run-sync
++  "Runs a cats.effect.IO synchronously via the global IORuntime -- the
++   first place this file needs cats-effect at all (everything above is
++   plain/synchronous). IORuntime is a class with a same-named companion
++   object, so (like scala.None above) its members aren't exposed as
++   plain static methods on the class -- go through IORuntime$/MODULE$,
++   same pattern as None$/MODULE$."
++  [io]
++  (.unsafeRunSync io (.global IORuntime$/MODULE$)))
++
++(defn- compile-sample-class []
++  (unsafe-run-sync
++   (ClassASTBridge/compileClass
++    (fixture/generate-sample-class-bytes) "execute" (scala-opt nil) false)))
++
++(deftest compile-class-reads-real-bytecode-test
++  (testing "ClassASTBridge/compileClass, given a real ASM-generated .class
++            file, extracts the same 3-instruction shape (BIPUSH/ICONST_2/
++            IADD) that MecrispCompiler.compile produces from hand-fed
++            opcodes above -- confirming scanMethod's ClassReader/
++            MethodVisitor actually reads what it's supposed to, not just
++            that MecrispCompiler's translation table is correct in
++            isolation. Also confirms the constructor (<init>, a
++            differently-named method in the same class) is correctly
++            skipped rather than matched or interfered with."
++    (let [result (compile-sample-class)]
++      (is (= 1 (.size (.words result))))
++      (is (= 3 (.size (.rows result))))
++      (is (= 32 (.length (.fileHash result)))))))
++
++(deftest compile-class-file-hash-matches-rows-test
++  (testing "compileClass's own fileHash (computed once from the real class
++            bytes via ClassFileHash.fromMd5) is the same value threaded
++            into every row it produces -- the same consistency
++            to-rows-threads-class-file-hash-through-every-row-test checks
++            above, but end-to-end from real bytecode instead of a
++            placeholder hash passed in by hand."
++    (let [result (compile-sample-class)
++          rows   (CollectionConverters/asJava (.rows result))]
++      (is (seq rows))
++      (is (every? #(= (.fileHash result) (.classFileHash %)) rows)))))
+\ No newline at end of file
+diff --git a/modules/postgres-bridge/test/main/clojure/siunertaq/postgres_bridge_job_test.clj b/modules/postgres-bridge/test/main/clojure/siunertaq/postgres_bridge_job_test.clj
+new file mode 100644
+index 0000000..a0f0108
+--- /dev/null
++++ b/modules/postgres-bridge/test/main/clojure/siunertaq/postgres_bridge_job_test.clj
+@@ -0,0 +1,60 @@
++(ns siunertaq.postgres-bridge-job-test
++  "Validates PostgresBridgeJob.dhall against the exact production loading
++   path PostgresBridgeApp.scala uses at startup:
++   DhallBatchRegistry.evalDhall (modules/dhall-bridge, shells out to
++   dhall-to-json) followed by PostgresBridgeJobDef.decodeJson. Nothing
++   validated this Dhall file at all before this test existed -- a syntax
++   error, a type mismatch, or a field-name typo (this file's JSON keys
++   are snake_case; ClassCompilationTarget's Decoder reads
++   class_file_path/target_method/target_descriptor/allow_stubs
++   specifically) would previously only surface by actually running
++   PostgresBridgeApp against a live ClickHouse.
++
++   Needs dhall-to-json on $PATH -- clojure_ci.yml installs it for this
++   job the same way it already does for dhall-bridge's own tests."
++  (:require [clojure.test :refer [deftest is testing]]
++            [clojure.string :as str])
++  (:import [io.siunertaq.batch DhallBatchRegistry]
++           [io.siunertaq.postgres PostgresBridgeJobDef]
++           [cats.effect.unsafe IORuntime IORuntime$]
++           [scala.jdk.javaapi CollectionConverters]))
++
++(defn- unsafe-run-sync
++  "Same IORuntime$/MODULE$ pattern as compilation-wiring-test.clj's
++   helper of the same name -- see that file for why the class/companion-
++   object split makes this necessary rather than a plain static call."
++  [io]
++  (.unsafeRunSync io (.global IORuntime$/MODULE$)))
++
++(def dhall-path
++  ;; Relative to modules/postgres-bridge (clojure -X:test's cwd per
++  ;; clojure_ci.yml's working-directory setting), same convention
++  ;; schema_drift_test.clj already uses for extension/clickhouse_schema.sql
++  ;; -- NOT the repo-root-relative path PostgresBridgeApp.scala's default
++  ;; env var uses, since that one runs via sbt from the repo root instead.
++  "src/main/resources/PostgresBridgeJob.dhall")
++
++(defn- load-job-def []
++  (let [expr (slurp dhall-path)
++        json (unsafe-run-sync (DhallBatchRegistry/evalDhall expr))]
++    (PostgresBridgeJobDef/decodeJson json)))
++
++(deftest postgres-bridge-job-dhall-parses-test
++  (testing "PostgresBridgeJob.dhall type-checks as valid Dhall and its
++            dhall-to-json output decodes into PostgresBridgeJobDef
++            without error, with at least one target declared."
++    (let [job-def (load-job-def)]
++      (is (= "postgres-bridge-compile" (.jobName job-def)))
++      (is (pos? (.size (.targets job-def)))))))
++
++(deftest postgres-bridge-job-dhall-targets-well-formed-test
++  (testing "Every declared target has a non-blank class_file_path and
++            target_method -- catches an empty-string typo that would
++            still type-check as valid Dhall/JSON but fail loudly (or
++            silently no-op) much later inside CompileClassTasklet,
++            rather than here."
++    (let [targets (CollectionConverters/asJava (.targets (load-job-def)))]
++      (is (seq targets))
++      (doseq [t targets]
++        (is (not (str/blank? (.classFilePath t))))
++        (is (not (str/blank? (.targetMethod t))))))))
+\ No newline at end of file
