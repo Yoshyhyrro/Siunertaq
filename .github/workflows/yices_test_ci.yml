@@ -51,7 +51,7 @@ jobs:
         uses: actions/setup-java@v6
         with:
           distribution: oracle-openjdk
-          java-version: '27-ea'
+          java-version: '27'
           cache: sbt
       - name: set up sbt
         uses: sbt/setup-sbt@v1
