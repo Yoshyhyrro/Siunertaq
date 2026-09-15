@@ -3,7 +3,7 @@ name: Clojure CI
 on:
   push:
     branches:
-      - "hotfix/example/rows-wordBuf_clojure-test"
+      - "feature/example/jdk_27"
     paths:
       - modules/dhall-bridge/**
       - modules/postgres-bridge/**
