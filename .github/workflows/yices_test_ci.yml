@@ -47,9 +47,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Oracle JDK 27 (EA)
-        uses: oracle-actions/setup-oracle-jdk@v1
+        # Verify JDK installation step after workflow execution
+        uses: actions/setup-java@v6
         with:
-          distribution: oracle
+          distribution: oracle-openjdk
           java-version: '27-ea'
           cache: sbt
       - name: set up sbt
