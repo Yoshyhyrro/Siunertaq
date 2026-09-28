@@ -34,7 +34,7 @@ jobs:
 
       # Official Setup Clojure Action
       - name: Setup Clojure
-        uses: DeLaGuardo/setup-clojure@5.0
+        uses: DeLaGuardo/setup-clojure@v5
         with:
           cli: 'latest'
 
