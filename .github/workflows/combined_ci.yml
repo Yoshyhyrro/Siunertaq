@@ -39,7 +39,7 @@ jobs:
   # Job 1: Yices Threshold & Common Library Build
   # =========================================================================
   yices-threshold-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       RUN_YICES_SMOKE: "1"
