@@ -35,7 +35,7 @@ concurrency:
 
 jobs:
   yices-threshold-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       RUN_YICES_SMOKE: "1"
@@ -89,6 +89,7 @@ jobs:
             "batchBridge/compile"                               \
             "batchBridge/testOnly io.siunertaq.batch.PerlBridgeSpec" \
             "postgresBridge/compile"                            \
+            "postgresBridge/testOnly io.siunertaq.postgres.*"     \
             "petersenMzv/compile"                              \
             "yicesBridge/testOnly io.siunertaq.yicesbridge.*"
 

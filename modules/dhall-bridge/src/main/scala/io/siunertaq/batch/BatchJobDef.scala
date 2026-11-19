@@ -1,6 +1,7 @@
 package io.siunertaq.batch
 
 import io.circe.{Decoder, DecodingFailure, HCursor}
+import io.siunertaq.BSDVertex
 import io.siunertaq.expr.{Instr, Program}
 
 // ─── CondOp ───────────────────────────────────────────────────────────────
@@ -92,6 +93,10 @@ private def decodeVertexTag(c: HCursor): Either[DecodingFailure, String] =
   c.as[String]
 
 // ─── StepDef ──────────────────────────────────────────────────────────────
+//
+// Note: Decoder[Instr] and Decoder[Program] are resolved automatically via
+// io.siunertaq.expr.Instr / Program's companion objects (core) — no explicit
+// import needed, now that StackInstrDecoder has moved to core.
 
 final case class StepDef(
   name:       String,
@@ -103,7 +108,6 @@ final case class StepDef(
 ) derives CanEqual
 
 object StepDef:
-  import StackInstrDecoder.given
   given Decoder[StepDef] = Decoder.instance { c =>
     for
       name       <- c.downField("name").as[String]
@@ -111,7 +115,7 @@ object StepDef:
       cond       <- c.downField("cond").as[Option[CondExpr]]
       normVertex <- c.downField("norm_vertex")
                .as(using Decoder.instance(decodeVertexTag))
-      inputProg  <- c.downField("input_prog").as[List[Instr]].map(_.toVector)
+      inputProg  <- c.downField("input_prog").as[Program]
       priority   <- c.downField("priority").as[Int]
     yield StepDef(name, effectTag, cond, normVertex, inputProg, priority)
   }

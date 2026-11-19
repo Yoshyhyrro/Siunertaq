@@ -22,11 +22,12 @@ The repository combines:
 
 | Module | Role | Key Types |
 |---|---|---|
-| `core` | BSD quiver, Golay lattice, arithmetic IR, threshold AST | `BSDArrow`, `GolayWeight`, `PhantomCarabiner`, `Expr` |
+| `core` | BSD quiver, Golay lattice, arithmetic IR, threshold AST, canonical StackInstr JSON codec | `BSDArrow`, `GolayWeight`, `PhantomCarabiner`, `Expr`, `NamespaceCanon` |
 | `z3-bridge` | Z3 JNI Banach constraint solver | `BanachConstraintSolver` |
 | `yices-bridge` | Yices 2 SMT cross-check lane + smoke tests | `YicesThresholdSolver`, `YicesSmtLib` |
 | `dhall-bridge` | Dhall → JSON → Scala batch job decoder | `BatchJobDef`, `CondEvaluator`, `DhallBatchRegistry` |
 | `batch-bridge` | JCL/JES2-style Pekko + Spring Batch orchestration | `JobSupervisorActor`, `StepExecutorActor`, `StackMachineTasklet`, `PerlBridge` |
+| `postgres-bridge` | JVM bytecode → Forth compilation, PostgreSQL audit log, ClickHouse analytics | `ClassASTBridge`, `MecrispCompiler`, `ClickHouseSync` |
 | `petersen-mzv` | MZV depth-3 reduction on the Petersen phase graph | `PetersenFluidMachine`, `ImaginaryPopperActor`, `MZVMachineBean` |
 | `postgres-bridge` | `.class` bytecode → Mecrisp Forth translation; ClickHouse analytics sink | `ClassASTBridge`, `MecrispCompiler`, `ClickHouseSyncActor`, `ClassFileHash` |
 | `mlir-bridge` | *(planned)* MLIR / Affine Dialect integration | — |
@@ -171,6 +172,8 @@ Siunertaq builds a **language-agnostic stack machine IR** that evaluates the sam
 | Analytics | ClickHouse | High-throughput CDC mirror; materialised views for opcode frequency, dead-code, MZV weight distribution |
 
 Cross-language correctness is verified by `PerlBridge` (`RUN_PERL_CROSSCHECK=1`): Scala JVM and Perl evaluate the same `Program` independently, and any divergence immediately sets `ExitStatus.FAILED`. The same pattern extends to further language backends.
+
+At the analytics layer, `NamespaceCanon` (`core`) folds a JVM `(class, method)` pair and a Perl `(package, sub)` pair down to the same neutral `canonical_name` key (e.g. `expr.program.to_json`), so ClickHouse can join JVM- and Perl-origin rows on that key via the `cross_language_equivalences` view once a Perl-side bridge populates it.
 
 ---
 
@@ -327,12 +330,15 @@ modules/
   core/
     src/main/scala/io/siunertaq/
       BSDQuiver.scala         — BSDArrow (phantom-typed quiver), BSDVertex, FVRole, DP state, BSDQuiverManager
+      NamespaceCanon.scala    — folds JVM class/method and Perl package/sub names to one canonical
+                                cross-language key (fromJvm, fromPerl, suggestPerlPackage/Sub)
       MachineConstants.scala  — galoisHeight (log), octadHeight (linear), CarabinerHeight typeclass,
                                 machineEpsilonReal, valuationDepth, arikiKoike{N,R}, M₂₄ rigid triple
       carabiner/              — GolayWeight extensions, SpaceTag, Carabiner, Route, golayRoute,
                                 ComplexWeight (opaque), PhantomCarabiner, PhantomCarabinerRef (opaque)
       yangbaxter/             — SpiralRotation, spiralToSpectralParam, spectralRMatrix, BraidWord
-      expr/                   — arithmetic ADTs, a stack-machine lowering, evaluator, and S-expression codec
+      expr/                   — arithmetic ADTs, a stack-machine lowering, evaluator, S-expression codec,
+                                and the canonical StackInstr JSON codec (Program.toJson / Decoder[Instr])
       threshold/              — constraint AST, canonical S-expression support, solver input generation
   z3-bridge/          — Z3-backed Banach constraint verification (JNI)
   yices-bridge/       — Yices 2 cross-check lane (subprocess) + smoke tests
@@ -342,7 +348,20 @@ modules/
     src/main/scala/io/siunertaq/
       dhall/          — DhallEffectRegistry: Dhall → IO effect registration
       batch/          — BatchJobDef, DhallBatchRegistry, CondEvaluator
-  batch-bridge/       — Spring Batch + Pekko JES2; StackMachineTasklet, StepExecutorActor, JobSupervisorActor, PerlBridge (OS-aware Perl cross-validation)
+  batch-bridge/
+    src/main/resources/perl/
+      Siunertaq/StackMachine.pm — Perl mirror of expr.Program; executes the shared StackInstr JSON via JSON::PP
+    src/main/scala/io/siunertaq/batch/
+                        — StackMachineTasklet, StepExecutorActor, JobSupervisorActor,
+                          PerlBridge (OS-aware Perl cross-validation, RUN_PERL_CROSSCHECK=1)
+  postgres-bridge/
+    extension/
+      clickhouse_schema.sql                  — bytecode_instructions, forth_words, mzv_triple_stream, and analytics views
+      clickhouse_schema_v2_canonical_name.sql — adds canonical_name to bytecode_instructions/forth_words,
+                                                 cross_language_equivalences VIEW, canonical_opcode_frequency_mv
+    src/main/scala/io/siunertaq/postgres/
+                        — ClassASTBridge (.class → StackInstr JSON, fail-fast on unsupported opcodes),
+                          ClickHouseSync (CDC mirror; injects NamespaceCanon.fromJvm as canonical_name)
   mlir-bridge/        — planned MLIR / Affine Dialect integration
   postgres-bridge/
     extension/
@@ -430,6 +449,7 @@ output about this project's own domain, and `dhall-bridge`'s Clojure/Alexander�
 - Yices-verified norm thresholds wired directly into `StepExecutorActor` pre-conditions, so a step that would violate a BSD norm bound is rejected before Spring Batch ever runs it
 - `mlir-bridge`: map `BSDArrow` decompositions to MLIR Affine Dialect norm constraints, JIT via LLVM IR
 - Language bridge expansion: extend the `PerlBridge` pattern to **Portable Ruby** (mruby or CRuby `--with-static-stdlib`) as the next cross-validation target; unify `PerlBackend` and `RubyBackend` under a `ScriptBackend` trait so `toPerlScript` / `toRubyScript` share one generator
+- `PmASTBridge`: a Perl-side counterpart to `ClassASTBridge` that writes `forth_words` rows tagged `language = 'perl'`, so `cross_language_equivalences` can actually surface JVM/Perl pairs instead of JVM-only rows
 - ClickHouse: additional materialised views for per-step latency distribution and cross-language divergence tracking (cases where `MISMATCH` was logged)
 - `postgres-bridge`: wire `mzv_triple_log` PostgreSQL audit table directly into the Pekko supervision tree so every `ImaginaryPopperActor` regularization event is immutably recorded (ClickHouse CDC mirror `mzv_triple_stream` is complete; direct actor-tree wiring is pending)
 - `postgres-bridge`: give `ClassASTBridge.compileFromClassFile` an actual caller — a directory watcher, a build-time hook, or a CLI entry point. The translation → ClickHouse ingestion path is fully wired end-to-end now (see Current status), but nothing in the source tree currently invokes it, so no bytecode compilation happens outside of `compilation_wiring_test.clj`'s own test fixtures

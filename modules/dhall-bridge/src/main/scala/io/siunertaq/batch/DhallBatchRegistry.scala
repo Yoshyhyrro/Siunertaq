@@ -3,10 +3,12 @@ package io.siunertaq.batch
 import cats.effect.IO
 import io.circe.parser.decode
 
-/** DhallEffectRegistry と同じパターンで BatchJobDef を読み込む。
+/** Loads a BatchJobDef using the same pattern as DhallEffectRegistry.
  *
- *  Dhall は全域言語なので評価は必ず停止する。
- *  dhall-to-json サブプロセス → JSON → circe decode → BatchJobDef
+ *  Dhall is evaluated as a subprocess (`dhall-to-json`), and the result is
+ *  decoded directly into a BatchJobDef via circe.
+ *
+ *  Pipeline: dhall-to-json subprocess -> JSON -> circe decode -> BatchJobDef
  */
 object DhallBatchRegistry:
 

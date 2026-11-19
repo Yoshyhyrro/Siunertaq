@@ -1,0 +1,90 @@
+name: Perl Cross-Version Round-Trip Check
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hotfix/gamma/namespace_PmASTBridge
+    paths:
+      - modules/batch-bridge/src/main/resources/perl/**
+      - modules/batch-bridge/src/test/resources/perl-version-matrix/**
+      - .github/workflows/perl_version_matrix_ci.yml
+  pull_request:
+    paths:
+      - modules/batch-bridge/src/main/resources/perl/**
+      - modules/batch-bridge/src/test/resources/perl-version-matrix/**
+      - .github/workflows/perl_version_matrix_ci.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perl-round-trip-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  perl-round-trip:
+    runs-on: ubuntu-latest
+    # Building perl:5.16 from source (see Dockerfile.perl-5.16) adds a few
+    # minutes vs. pulling a pre-built tag -- bumped from 10 to 20.
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # ubuntu-latest already ships Docker + the docker compose v2 plugin,
+      # so no extra setup step is needed here (unlike the Yices workflow's
+      # apt-get install step).
+      #
+      # NOTE: there is no daemon.json setting that "re-enables" pulling
+      # legacy Image Manifest v2 Schema 1 images (removed in Docker Engine
+      # v28.2) -- a previous attempt at that here broke the Docker daemon
+      # outright and caused this whole job to fail before the real test
+      # step even ran. The actual fix is Dockerfile.perl-5.16, which
+      # builds that Perl version from source on a current base image
+      # instead of pulling the old perl:5.16 tag.
+      - name: Run producer/consumer round-trip matrix
+        working-directory: modules/batch-bridge/src/test/resources/perl-version-matrix
+        run: |
+          set -euo pipefail
+
+          # Prepare and clean up the fixture output directory
+          mkdir -p fixtures/out
+          rm -f fixtures/out/*.json || true
+
+          # Baseline Perl versions to test
+          versions=(5-16 5-26 5-34 latest)
+
+          # Force-build all service containers before execution.
+          echo "=== building/verifying docker images ==="
+          docker compose build
+
+          echo "=== producing ==="
+          for v in "${versions[@]}"; do
+            echo "--- produce-$v ---"
+            docker compose run --rm "produce-$v"
+          done
+
+          echo "=== consuming (NxM round-trip) ==="
+          fail=0
+          for v in "${versions[@]}"; do
+            echo "--- consume-$v ---"
+            docker compose run --rm "consume-$v" || fail=1
+          done
+
+          # Perform post-run cleanup of containers and volumes
+          docker compose down -v >/dev/null 2>&1 || true
+          exit $fail
+
+      - name: Show container logs on failure
+        if: failure()
+        working-directory: modules/batch-bridge/src/test/resources/perl-version-matrix
+        run: docker compose logs || true
+
+      - name: Upload fixture JSON on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perl-round-trip-fixtures-${{ github.sha }}
+          path: modules/batch-bridge/src/test/resources/perl-version-matrix/fixtures/out
+          if-no-files-found: warn
