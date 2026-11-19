@@ -1,0 +1,49 @@
+;; modules/postgres-bridge/deps.edn
+{:paths ["src/main/clojure"]
+ :mvn/repos {"clojars" {:url "https://repo.clojars.org/"}}
+ :deps {}
+
+ :aliases
+ {;; Runs the clojure.test namespaces under test/main/clojure via
+  ;; cognitect-labs/test-runner (see modules/dhall-bridge/deps.edn for
+  ;; the same pattern -- cognitect-labs/test-runner is only published
+  ;; via git, not Maven Central).
+  :test
+  {:extra-paths ["test/main/clojure"]
+   :extra-deps {org.clojure/test.check {:mvn/version "1.1.0"}
+                io.github.cognitect-labs/test-runner
+                {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+   :exec-fn cognitect.test-runner.api/test}
+
+  ;; Real JVM interop into this module's compiled Scala classes (used by
+  ;; compilation-wiring-test.clj; mecrisp-instr-test.clj's header
+  ;; describes the same need but still uses a transcribed model).
+  ;;
+  ;; LOCAL DEV CONVENIENCE ONLY -- CI does NOT use this alias. The path
+  ;; below is confirmed from an actual CI compile log (not a guess this
+  ;; time): `sbt postgresBridge/compile` reported "compiling 12 Scala
+  ;; sources to .../modules/postgres-bridge/target/scala-3.8.3/classes"
+  ;; -- sbt's crossTarget apparently uses the full scalaVersion
+  ;; (3.8.3), not just the binary "3", contrary to what was assumed
+  ;; earlier. clojure_ci.yml still asks sbt directly for
+  ;; postgresBridge's real classpath rather than relying on this path,
+  ;; since it's cheap to keep doing that and removes any need to keep
+  ;; this comment in sync with future Scala/sbt version bumps.
+  ;;
+  ;; If your local sbt output differs, run
+  ;; `sbt postgresBridge/Compile/classDirectory` to check, then
+  ;; `sbt postgresBridge/compile` followed by
+  ;; `clojure -X:test:scala-classes`.
+  ;;
+  ;; org.scala-lang/scala3-library_3: MecrispCompiler/MecrispWordDef/
+  ;; MecrispInstr/BytecodeRow/ClassFileHash use scala.Option/Tuple2/
+  ;; Vector etc., which live here, not in target/. Pinned to match
+  ;; ThisBuild / scalaVersion in build.sbt. This part isn't a guess.
+  ;; ClassASTBridge.scala and ClickHouseSync.scala additionally need
+  ;; cats-effect/circe/pekko/ASM on the classpath, which this alias
+  ;; does not attempt to provide -- another reason CI uses sbt's own
+  ;; fullClasspath instead of trying to hand-enumerate every dependency
+  ;; here.
+  :scala-classes
+  {:extra-paths ["target/scala-3.8.3/classes"]
+   :extra-deps {org.scala-lang/scala3-library_3 {:mvn/version "3.8.3"}}}}}

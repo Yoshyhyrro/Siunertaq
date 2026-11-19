@@ -4,16 +4,16 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - hotfix/gamma/namespace_PmASTBridge
+      - example/feature/clojure_Alexander–Hodge
     paths:
       - build.sbt
       - modules/core/**
       - modules/z3-bridge/**
-      - modules/dhall-bridge/**
-      - modules/batch-bridge/**
+      - modules/dhall-bridge/**          # Captures CondEvaluatorSpec changes
+      - modules/batch-bridge/**          # Captures PerlBridge and RubyBridge source changes
       - modules/yices-bridge/**
-      - examples/**
-      - modules/postgres-bridge/**
+      - examples/**                      # Example updates may affect downstream tests
+      - modules/postgres-bridge/**       # Postgres bridge updates may affect test suite execution
       - .github/workflows/yices_test_ci.yml
   pull_request:
     paths:
@@ -21,10 +21,10 @@ on:
       - modules/core/**
       - modules/z3-bridge/**
       - modules/dhall-bridge/**
-      - modules/batch-bridge/**
+      - modules/batch-bridge/**          # Captures PerlBridge and RubyBridge source changes
       - modules/yices-bridge/**
-      - examples/**
-      - modules/postgres-bridge/**
+      - examples/**                      # Example updates may affect downstream tests
+      - modules/postgres-bridge/**       # Postgres bridge updates may affect test suite execution
       - .github/workflows/yices_test_ci.yml
 
 permissions:
@@ -40,23 +40,11 @@ jobs:
     env:
       RUN_YICES_SMOKE: "1"
       YICES_ARTIFACT_DIR: modules/yices-bridge/target/yices-artifacts
-      RUN_PERL_CROSSCHECK: "1"
-      PERL_SCRIPT_SAVE_DIR: ci-out/perl-scripts
-      
-      # --- Legacy C Compatibility Layer ---
-      # Modern GCC (10+) has introduced strict defaults that break legacy C code:
-      # 1. -std=gnu89: Use the 1989 standard with GNU extensions.
-      # 2. -fcommon: Revert the default '-fno-common' to allow multiple definitions of 
-      #    uninitialized global variables (essential for many old Perl XS/C libs).
-      # 3. -Wno-error: Ensure that warnings (implicit declarations, etc.) do not 
-      #    terminate the build.
-      # 4. -fno-strict-aliasing: Prevent aggressive optimization bugs in legacy pointer casting.
-      CFLAGS: "-std=gnu89 -O1 -fcommon -fno-strict-aliasing -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types -Wno-error"
-      PERL_MM_OPT: "CCFLAGS='-std=gnu89 -O1 -fcommon -fno-strict-aliasing -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types -Wno-error'"
-      
+      RUN_PERL_CROSSCHECK: "1"                       # Enable PerlBridgeSpec and .pl script generation
+      PERL_SCRIPT_SAVE_DIR: ci-out/perl-scripts      # Persist generated .pl scripts as build artifacts
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Temurin 17
         uses: actions/setup-java@v4
@@ -83,18 +71,19 @@ jobs:
           set -euxo pipefail
           yices-smt2 --version
 
+      # CondEvaluator is a pure Scala class, so its unit tests can be run without Yices installed.  This is useful for testing the CI setup itself.
       - name: Run CondEvaluator unit tests (pure; no Yices required)
         shell: bash
         run: |
           set -euxo pipefail
-          sbt "dhallBridge/testOnly io.siunertaq.batch.CondEvaluatorSpec"
+          sbt "batchBridge/testOnly io.siunertaq.batch.CondEvaluatorSpec"
 
       - name: Run threshold and Yices tests
         shell: bash
         run: |
           set -euxo pipefail
           sbt \
-            "core/testOnly io.siunertaq.threshold.*"           \
+            "core/testOnly io.siunertaq.threshold.* io.siunertaq.expr.NamespaceCanonHashedSpec" \
             "z3Bridge/compile"                                  \
             "yicesBridge/compile"                               \
             "batchBridge/compile"                               \
@@ -104,6 +93,11 @@ jobs:
             "petersenMzv/compile"                              \
             "yicesBridge/testOnly io.siunertaq.yicesbridge.*"
 
+      # --- Common Library Artifacts -----------------------------------------
+      # Package compiled classes into JARs. Incremental builds minimize overhead.
+      # Target modules: core (Program / Instr / Value IR definitions)
+      #                batch-bridge (PerlBridge / StackMachineTasklet / ScriptBackend)
+      #                postgres-bridge (ClickHouse schema + CDC pipeline)
       - name: Package common library JARs
         if: success()
         shell: bash
@@ -119,8 +113,9 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          mkdir -p ci-out/schema ci-out/perl-scripts
+          mkdir -p ci-out/schema ci-out/perl-scripts   # Ensure perl-scripts directory exists prior to search
 
+          # --- JAR: Store in module-specific subdirectories to prevent overwrite collisions ---
           for mod in core batch-bridge postgres-bridge; do
             src="modules/$mod/target"
             dest="ci-out/jars/$mod"
@@ -131,7 +126,10 @@ jobs:
               -print0 | xargs -0 -I{} cp {} "$dest/"
           done
 
-          for mod in core batch-bridge postgres-bridge; do
+          # --- .class: Collect while preserving package hierarchy ---
+          # Traverse subdirectories under target/scala-3.x.x/classes/ without maxdepth restriction
+          # Extract relative path starting from classes/ and copy to destination
+          for mod in core batch-bridge; do
             find "modules/$mod/target" -name "*.class" -path "*/classes/io/*" \
               -print0 | while IFS= read -r -d '' f; do
                 rel="${f##*/classes/}"
@@ -141,22 +139,26 @@ jobs:
               done
           done
 
+          # --- .pl: Scripts persisted in PERL_SCRIPT_SAVE_DIR ---
+          # Emitted by PerlBridge.executePerl when RUN_PERL_CROSSCHECK=1 is set
           pl_dir="${PERL_SCRIPT_SAVE_DIR:-ci-out/perl-scripts}"
           pl_count=$(find "$pl_dir" -name "*.pl" 2>/dev/null | wc -l)
           echo ".pl scripts collected: $pl_count"
 
+          # --- .pm: Perl modules located in batch-bridge resources (if present) ---
           pm_src="modules/batch-bridge/src/main/resources"
           if find "$pm_src" \( -name "*.pm" -o -name "*.pl" \) -quit 2>/dev/null \
              | grep -q .; then
             find "$pm_src" \( -name "*.pm" -o -name "*.pl" \) \
               -print0 | while IFS= read -r -d '' f; do
-                rel="${f#$pm_src/}"
+                rel="${f#$pm_src/}"          # e.g., perl/Siunertaq/StackMachine.pm
                 dest="ci-out/perl/$rel"
                 mkdir -p "$(dirname "$dest")"
                 cp "$f" "$dest"
               done
           fi
 
+          # --- ClickHouse schema SQL --------------------------------------------
           find . -path "*/resources/clickhouse_schema.sql" \
             -print0 | xargs -0 -I{} cp {} ci-out/schema/
 
@@ -165,7 +167,7 @@ jobs:
 
       - name: Upload common library
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: siunertaq-common-library-${{ github.sha }}
           path: ci-out/
@@ -173,7 +175,7 @@ jobs:
 
       - name: Upload Yices artifacts on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: yices-threshold-artifacts
           path: modules/yices-bridge/target/yices-artifacts
