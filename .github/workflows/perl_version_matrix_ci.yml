@@ -45,7 +45,36 @@ jobs:
       # instead of pulling the old perl:5.16 tag.
       - name: Run producer/consumer round-trip matrix
         working-directory: modules/batch-bridge/src/test/resources/perl-version-matrix
-        run: ./run.sh
+        run: |
+          set -euo pipefail
+
+          # Prepare and clean up the fixture output directory
+          mkdir -p fixtures/out
+          rm -f fixtures/out/*.json || true
+
+          # Baseline Perl versions to test
+          versions=(5-16 5-26 5-34 latest)
+
+          # Force-build all service containers before execution.
+          echo "=== building/verifying docker images ==="
+          docker compose build
+
+          echo "=== producing ==="
+          for v in "${versions[@]}"; do
+            echo "--- produce-$v ---"
+            docker compose run --rm "produce-$v"
+          done
+
+          echo "=== consuming (NxM round-trip) ==="
+          fail=0
+          for v in "${versions[@]}"; do
+            echo "--- consume-$v ---"
+            docker compose run --rm "consume-$v" || fail=1
+          done
+
+          # Perform post-run cleanup of containers and volumes
+          docker compose down -v >/dev/null 2>&1 || true
+          exit $fail
 
       - name: Show container logs on failure
         if: failure()
