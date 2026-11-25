@@ -83,7 +83,7 @@ jobs:
 
       - name: Upload fixture JSON on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: perl-round-trip-fixtures-${{ github.sha }}
           path: modules/batch-bridge/src/test/resources/perl-version-matrix/fixtures/out
