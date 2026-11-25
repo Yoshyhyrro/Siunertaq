@@ -30,7 +30,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # ubuntu-latest already ships Docker + the docker compose v2 plugin,
       # so no extra setup step is needed here (unlike the Yices workflow's
